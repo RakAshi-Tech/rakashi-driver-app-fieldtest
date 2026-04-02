@@ -8,6 +8,7 @@ const PROTECTED_PATHS = [
   "/tracking",
   "/arrival",
   "/completion",
+  "/set-destination",
 ]
 
 export function proxy(request: NextRequest) {
@@ -33,5 +34,6 @@ export const config = {
     "/tracking/:path*",
     "/arrival/:path*",
     "/completion/:path*",
+    "/set-destination/:path*",
   ],
 }

@@ -39,6 +39,15 @@ const DEFAULT_CENTER = {
   lng: 139.7004,
 }
 
+function getDestination(): { lat: number; lng: number } {
+  if (typeof window === "undefined") return DEFAULT_CENTER
+  try {
+    const saved = localStorage.getItem("destination")
+    if (saved) return JSON.parse(saved)
+  } catch {}
+  return DEFAULT_CENTER
+}
+
 const ARRIVAL_RADIUS_M = 30
 const ARRIVAL_DWELL_MS = 3000
 
@@ -59,6 +68,7 @@ function calcDistanceMeters(
 export function DeliveryTrackingScreen() {
   const router = useRouter()
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  const destination = getDestination()
 
   const [status, setStatus] = useState<DeliveryStatus>("en-route")
   const [isRecording, setIsRecording] = useState(true)
@@ -193,7 +203,7 @@ export function DeliveryTrackingScreen() {
 
     const distance = calcDistanceMeters(
       position.lat, position.lng,
-      DEFAULT_CENTER.lat, DEFAULT_CENTER.lng
+      destination.lat, destination.lng
     )
 
     if (distance <= ARRIVAL_RADIUS_M) {
@@ -233,9 +243,9 @@ export function DeliveryTrackingScreen() {
   }, [deliveryCompleted])
 
   const mapCenter = useMemo(() => {
-    if (status === "arrived") return DEFAULT_CENTER
+    if (status === "arrived") return destination
     if (position) return { lat: position.lat, lng: position.lng }
-    return DEFAULT_CENTER
+    return destination
   }, [position, status])
 
   const mapZoom = status === "arrived" ? 18 : 16
@@ -321,7 +331,7 @@ export function DeliveryTrackingScreen() {
           ) : (
             <>
               <img
-                src={`https://maps.googleapis.com/maps/api/streetview?size=600x200&location=${DEFAULT_CENTER.lat},${DEFAULT_CENTER.lng}&fov=90&heading=0&pitch=0&key=${apiKey}`}
+                src={`https://maps.googleapis.com/maps/api/streetview?size=600x200&location=${destination.lat},${destination.lng}&fov=90&heading=0&pitch=0&key=${apiKey}`}
                 alt="Street View"
                 className="w-full h-full object-cover"
                 onError={(e) => {
@@ -357,7 +367,7 @@ export function DeliveryTrackingScreen() {
         ) : (
           <APIProvider apiKey={apiKey}>
             <Map
-              defaultCenter={DEFAULT_CENTER}
+              defaultCenter={destination}
               center={mapCenter}
               defaultZoom={mapZoom}
               zoom={mapZoom}

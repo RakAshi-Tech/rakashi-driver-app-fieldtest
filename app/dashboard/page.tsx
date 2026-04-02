@@ -136,7 +136,14 @@ export default function HomePage() {
         </div>
 
         {/* Bottom CTA */}
-        <div className="p-3 pt-0 shrink-0">
+        <div className="p-3 pt-0 shrink-0 space-y-2">
+          <Button
+            onClick={() => router.push("/set-destination")}
+            variant="outline"
+            className="w-full h-12 text-base font-semibold rounded-xl border border-primary text-primary"
+          >
+            Set Destination
+          </Button>
           <Button
             onClick={handleStartNextJob}
             disabled={!firstPendingJob}
