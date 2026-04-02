@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(cmd /c \"taskkill /F /IM node.exe\")",
+      "Bash(npm run:*)",
+      "Bash(cmd:*)",
+      "Bash(powershell:*)",
+      "Bash(grep -v \"^$\\\\|profile\\\\|Execution\\\\|CategoryInfo\\\\|Qualified\\\\|^\\\\+\")",
+      "Bash(npm install:*)"
+    ]
+  }
+}

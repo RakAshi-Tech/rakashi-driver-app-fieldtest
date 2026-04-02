@@ -81,7 +81,7 @@ export function TodayJobsList({ jobs }: TodayJobsListProps) {
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-              <span className="text-xs font-semibold text-primary">₹{job.fee}</span>
+              <span className="text-xs font-semibold text-accent">₹{job.fee}</span>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
             </div>
           </Link>

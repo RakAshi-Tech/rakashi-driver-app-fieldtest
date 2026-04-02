@@ -190,14 +190,7 @@ export default function WaybillOcrPage() {
   };
 
   return (
-    <div className="dark min-h-screen bg-background flex items-center justify-center p-4">
-      {/* Phone frame */}
-      <div className="w-full max-w-[390px] h-[844px] bg-background rounded-[40px] border-[8px] border-secondary overflow-hidden shadow-2xl flex flex-col">
-        {/* Status bar mock */}
-        <div className="h-12 bg-background flex items-center justify-center">
-          <div className="w-32 h-6 bg-foreground/10 rounded-full" />
-        </div>
-
+    <div className="dark min-h-screen bg-background flex flex-col">
         {/* Header */}
         <header className="px-4 py-3 flex items-center justify-between border-b border-border/50">
           <div className="flex items-center gap-2">
@@ -342,12 +335,6 @@ export default function WaybillOcrPage() {
             </div>
           </div>
         </div>
-
-        {/* Home indicator mock */}
-        <div className="h-8 flex items-center justify-center">
-          <div className="w-32 h-1 bg-foreground/20 rounded-full" />
-        </div>
-      </div>
 
       {/* Modals */}
       <HelpModal open={helpOpen} onOpenChange={setHelpOpen} />

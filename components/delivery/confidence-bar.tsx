@@ -36,10 +36,10 @@ export function ConfidenceBar() {
   const c = config[confidence]
 
   return (
-    <section className="px-4 py-3" aria-label="Route confidence information">
-      <div className={`rounded-xl border ${c.borderColor} ${c.bgColor} px-4 py-3`}>
+    <section className="px-4 py-1" aria-label="Route confidence information">
+      <div className={`rounded-xl border ${c.borderColor} ${c.bgColor} px-3 py-2`}>
         {/* Confidence bar */}
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-1.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className={`h-4 w-4 ${c.textColor}`} />
             <span className={`text-xs font-black uppercase tracking-wider ${c.textColor}`}>
@@ -50,7 +50,7 @@ export function ConfidenceBar() {
         </div>
 
         {/* Progress bar */}
-        <div className="mb-3 h-2.5 w-full overflow-hidden rounded-full bg-background/50">
+        <div className="mb-1.5 h-2 w-full overflow-hidden rounded-full bg-background/50">
           <div
             className={`h-full rounded-full ${c.barColor} transition-all duration-1000`}
             style={{ width: confidence === "high" ? "92%" : confidence === "medium" ? "60%" : "30%" }}
@@ -59,10 +59,10 @@ export function ConfidenceBar() {
 
         {/* Arrival success badge */}
         <div className="flex items-center gap-2">
-          <Award className={`h-5 w-5 ${c.textColor}`} />
-          <span className={`text-sm font-bold ${c.textColor}`}>
+          <Award className={`h-4 w-4 ${c.textColor}`} />
+          <span className={`text-xs font-bold ${c.textColor}`}>
             Arrived Successfully{" "}
-            <span className="text-lg font-black">{successCount}</span> times
+            <span className="text-sm font-black">{successCount}</span> times
           </span>
         </div>
       </div>

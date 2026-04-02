@@ -1,20 +1,49 @@
 "use client"
 
-import Image from "next/image"
 import { Eye } from "lucide-react"
 
-export function EntrancePhoto() {
+const DEFAULT_CENTER = { lat: 35.6595, lng: 139.7004 }
+
+interface EntrancePhotoProps {
+  latitude?: number
+  longitude?: number
+  language?: string
+}
+
+export function EntrancePhoto({ latitude, longitude, language }: EntrancePhotoProps) {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  const lat = latitude ?? DEFAULT_CENTER.lat
+  const lng = longitude ?? DEFAULT_CENTER.lng
+
   return (
     <section className="relative" aria-label="Entrance photo confirmation">
-      {/* Entrance image */}
-      <div className="relative h-56 w-full overflow-hidden">
-        <Image
-          src="/images/entrance.jpg"
-          alt="Delivery destination entrance - blue shutter next to tea stall"
-          fill
-          className="object-cover"
-          priority
-        />
+      {/* Street View image */}
+      <div className="relative h-36 w-full overflow-hidden">
+        {!apiKey ? (
+          <div className="flex h-full w-full items-center justify-center bg-secondary text-sm text-foreground">
+            {language === "hi" ? "Street View उपलब्ध नहीं" : "Street Viewデータがありません"}
+          </div>
+        ) : (
+          <>
+            <img
+              src={`https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${lat},${lng}&fov=90&heading=0&pitch=0&key=${apiKey}`}
+              alt="Delivery destination entrance - Street View"
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                const target = e.currentTarget
+                target.style.display = "none"
+                const fallback = target.nextElementSibling as HTMLElement | null
+                if (fallback) fallback.style.display = "flex"
+              }}
+            />
+            <div
+              className="absolute inset-0 items-center justify-center bg-secondary text-sm text-foreground"
+              style={{ display: "none" }}
+            >
+              {language === "hi" ? "Street View उपलब्ध नहीं" : "Street Viewデータがありません"}
+            </div>
+          </>
+        )}
 
         {/* Highlighted door area overlay */}
         <div className="absolute inset-0 flex items-center justify-center">

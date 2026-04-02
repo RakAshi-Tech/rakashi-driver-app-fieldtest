@@ -20,7 +20,7 @@ export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
   }
 
   const getScoreColor = () => {
-    if (score >= 80) return "text-primary"
+    if (score >= 80) return "text-accent"
     if (score >= 60) return "text-accent"
     return "text-destructive"
   }

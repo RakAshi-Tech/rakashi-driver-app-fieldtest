@@ -1,366 +1,625 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Truck, MessageCircle } from "lucide-react"
+import { MessageCircle, Camera, CheckCircle2, Truck, Phone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { supabase } from "@/lib/supabase"
 
-type OtpMethod = "whatsapp" | "sms"
-type ScreenState = "phone" | "otp"
+type Screen = "phone" | "otp" | "profile"
 type Language = "en" | "hi"
+type VehicleType = "E-Rickshaw" | "Cargo Bike" | "Other"
+type LoginTab = "whatsapp" | "sms"
 
-const translations = {
-  en: {
-    title: "RakAshi Driver",
-    subtitle: "Sign in with your phone number",
-    phonePlaceholder: "Phone number",
-    sendCode: "Send code",
-    helperText: "We'll send a one-time code.",
-    termsText: "By continuing, you agree to",
-    terms: "Terms",
-    privacy: "Privacy",
-    enterCode: "Enter the 6-digit code sent to",
-    resendIn: "Resend in",
-    resendCode: "Resend code",
-    useInstead: "Use {method} instead",
-    continue: "Continue",
-    changePhone: "Change phone number",
-    demoLogin: "Demo login (skip OTP)",
-    invalidCode: "Invalid code. Try again.",
-    invalidPhone: "Please enter a valid phone number",
-  },
-  hi: {
-    title: "RakAshi Driver",
-    subtitle: "अपने फ़ोन नंबर से साइन इन करें",
-    phonePlaceholder: "फ़ोन नंबर",
-    sendCode: "कोड भेजें",
-    helperText: "हम एक बार उपयोग होने वाला कोड भेजेंगे।",
-    termsText: "जारी रखकर आप सहमत हैं",
-    terms: "नियम",
-    privacy: "गोपनीयता",
-    enterCode: "6 अंकों का कोड दर्ज करें जो भेजा गया",
-    resendIn: "पुनः भेजें",
-    resendCode: "कोड पुनः भेजें",
-    useInstead: "{method} का उपयोग करें",
-    continue: "जारी रखें",
-    changePhone: "फ़ोन नंबर बदलें",
-    demoLogin: "डेमो लॉगिन (OTP छोड़ें)",
-    invalidCode: "अमान्य कोड। पुनः प्रयास करें।",
-    invalidPhone: "कृपया एक वैध फ़ोन नंबर दर्ज करें",
-  },
+// TODO: Replace with real WhatsApp Business API
+async function sendWhatsAppOTP(phoneNumber: string): Promise<{ success: boolean; messageId: string }> {
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  console.log("[WhatsApp OTP] Sending to:", phoneNumber)
+  return { success: true, messageId: "mock-" + Date.now() }
+}
+
+// TODO: Replace with real SMS API (Twilio/MSG91)
+async function sendSmsOTP(phoneNumber: string) {
+  await new Promise(resolve => setTimeout(resolve, 800))
+  console.log("[SMS OTP] Sending to:", phoneNumber)
+  return { success: true, messageId: 'sms-mock-' + Date.now() }
 }
 
 export default function LoginPage() {
   const router = useRouter()
-  const [phoneNumber, setPhoneNumber] = useState("")
-  const [countryCode] = useState("+91")
-  const [otpMethod, setOtpMethod] = useState<OtpMethod>("whatsapp")
-  const [screenState, setScreenState] = useState<ScreenState>("phone")
-  const [otp, setOtp] = useState(["", "", "", "", "", ""])
-  const [timer, setTimer] = useState(45)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [screen, setScreen] = useState<Screen>("phone")
   const [language, setLanguage] = useState<Language>("en")
+  const [loginTab, setLoginTab] = useState<LoginTab>("whatsapp")
+
+  // Phone screen
+  const [phone, setPhone] = useState("")
+  const [sending, setSending] = useState(false)
+  const [sentMsg, setSentMsg] = useState(false)
+  const [phoneError, setPhoneError] = useState("")
+
+  // OTP screen
+  const [otp, setOtp] = useState(["", "", "", "", "", ""])
+  const [verifying, setVerifying] = useState(false)
+  const [otpError, setOtpError] = useState("")
+  const [resendTimer, setResendTimer] = useState(30)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
-  const t = translations[language]
+  // Profile screen
+  const [name, setName] = useState("")
+  const [vehicleType, setVehicleType] = useState<VehicleType>("E-Rickshaw")
+  const [vehicleCode, setVehicleCode] = useState("")
+  const [scanning, setScanning] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState("")
+  const qrInputRef = useRef<HTMLInputElement>(null)
 
+  // 古いCookieとlocalStorageを全てクリア
   useEffect(() => {
-    let interval: NodeJS.Timeout
-    if (screenState === "otp" && timer > 0) {
-      interval = setInterval(() => {
-        setTimer((prev) => prev - 1)
-      }, 1000)
-    }
-    return () => clearInterval(interval)
-  }, [screenState, timer])
+    localStorage.removeItem('loggedIn')
+    document.cookie = 'rakashi-auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
+  }, [])
 
+  // Resend timer
   useEffect(() => {
-    const isLoggedIn = localStorage.getItem("loggedIn")
-    if (isLoggedIn === "true") {
-      router.push("/dashboard")
-    }
-  }, [router])
+    if (screen !== "otp" || resendTimer <= 0) return
+    const t = setInterval(() => setResendTimer((p) => p - 1), 1000)
+    return () => clearInterval(t)
+  }, [screen, resendTimer])
 
-  const handleSendCode = () => {
-    if (phoneNumber.length < 10) {
-      setError(t.invalidPhone)
+  // --- Screen 1: Send OTP ---
+  const handleSendOTP = async () => {
+    if (phone.length < 10) {
+      setPhoneError(language === "en" ? "Please enter a valid 10-digit number" : "कृपया 10 अंकों का नंबर दर्ज करें")
+      return
+    }
+    setSending(true)
+    setPhoneError("")
+    if (loginTab === "whatsapp") {
+      await sendWhatsAppOTP(`+91${phone}`)
+    } else {
+      await sendSmsOTP(`+91${phone}`)
+    }
+    setSending(false)
+    setSentMsg(true)
+    setTimeout(() => {
+      setSentMsg(false)
+      setScreen("otp")
+      setResendTimer(30)
+      setTimeout(() => otpRefs.current[0]?.focus(), 100)
+    }, 1200)
+  }
+
+  // --- Screen 2: Verify OTP ---
+  const handleOtpChange = (i: number, val: string) => {
+    if (!/^\d*$/.test(val)) return
+    const next = [...otp]
+    next[i] = val.slice(-1)
+    setOtp(next)
+    setOtpError("")
+    if (val && i < 5) otpRefs.current[i + 1]?.focus()
+  }
+
+  const handleOtpKeyDown = (i: number, e: React.KeyboardEvent) => {
+    if (e.key === "Backspace" && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus()
+  }
+
+  const handleVerifyOTP = async () => {
+    const code = otp.join("")
+    if (code.length !== 6) return
+
+    setVerifying(true)
+    setOtpError("")
+
+    // モックチェックを最優先
+    if (code === "123456") {
+      console.log("[OTP] Mock OTP verified")
+
+      // phone_numberをlocalStorageに保存（dashboard等で使用）
+      localStorage.setItem("rakashi_phone", `+91${phone}`)
+      // Cookieを設定（proxy.tsの認証チェック用）
+      document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
+
+      try {
+        const { data: profile } = await supabase
+          .from("driver_profiles")
+          .select("name")
+          .eq("phone_number", `+91${phone}`)
+          .single()
+
+        if (profile?.name) {
+          // 既存ユーザー → ダッシュボードへ
+          router.push("/dashboard")
+        } else {
+          // 新規ユーザー → onboardingへ
+          router.push(`/onboarding?phone=${phone}`)
+        }
+      } catch {
+        // プロフィールがない場合はonboardingへ
+        router.push(`/onboarding?phone=${phone}`)
+      }
       return
     }
 
-    setIsLoading(true)
-    setError("")
-
-    setTimeout(() => {
-      setIsLoading(false)
-      setScreenState("otp")
-      setTimer(45)
-      setTimeout(() => otpRefs.current[0]?.focus(), 100)
-    }, 800)
-  }
-
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return
-
-    const newOtp = [...otp]
-    newOtp[index] = value.slice(-1)
-    setOtp(newOtp)
-    setError("")
-
-    if (value && index < 5) {
-      otpRefs.current[index + 1]?.focus()
-    }
-  }
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus()
-    }
-  }
-
-  const handleVerifyOtp = () => {
-    const otpValue = otp.join("")
-    if (otpValue.length !== 6) return
-
-    setIsLoading(true)
-    setError("")
-
-    setTimeout(() => {
-      setIsLoading(false)
-      if (otpValue === "123456") {
-        localStorage.setItem("loggedIn", "true")
-        router.push("/dashboard")
-      } else {
-        setError(t.invalidCode)
-        setOtp(["", "", "", "", "", ""])
-        otpRefs.current[0]?.focus()
-      }
-    }, 800)
-  }
-
-  const handleResendCode = () => {
-    if (timer > 0) return
-    setTimer(45)
+    // 本物のOTP検証（将来用）
+    setOtpError(language === "en" ? "Invalid OTP. Please try again." : "अमान्य OTP। पुनः प्रयास करें।")
     setOtp(["", "", "", "", "", ""])
-    setError("")
+    otpRefs.current[0]?.focus()
+    setVerifying(false)
   }
 
-  const handleDemoLogin = () => {
-    localStorage.setItem("loggedIn", "true")
+  const handleResendOTP = async () => {
+    if (resendTimer > 0) return
+    setOtp(["", "", "", "", "", ""])
+    setOtpError("")
+    setResendTimer(30)
+    if (loginTab === "whatsapp") {
+      await sendWhatsAppOTP(`+91${phone}`)
+    } else {
+      await sendSmsOTP(`+91${phone}`)
+    }
+    setTimeout(() => otpRefs.current[0]?.focus(), 100)
+  }
+
+  // --- Screen 3: Profile ---
+  const handleQRScan = () => {
+    qrInputRef.current?.click()
+  }
+
+  const handleQRFile = () => {
+    // Mock: simulate QR scan result from camera capture
+    setScanning(true)
+    setTimeout(() => {
+      const mockCode = "VEH-" + Math.random().toString(36).substring(2, 8).toUpperCase()
+      setVehicleCode(mockCode)
+      setScanning(false)
+      if (qrInputRef.current) qrInputRef.current.value = ""
+    }, 1500)
+  }
+
+  const handleCompleteRegistration = async () => {
+    if (!name.trim()) {
+      setNameError(language === "en" ? "Please enter your name" : "कृपया अपना नाम दर्ज करें")
+      return
+    }
+    setSaving(true)
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase.from("driver_profiles").upsert({
+        id: user.id,
+        phone_number: `+91${phone}`,
+        name: name.trim(),
+        vehicle_type: vehicleType,
+      })
+    }
+
+    setSaving(false)
     router.push("/dashboard")
   }
 
-  const isOtpComplete = otp.every((digit) => digit !== "")
-  const formatTimer = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
+  const isOtpComplete = otp.every((d) => d !== "")
+  const vehicleOptions: VehicleType[] = ["E-Rickshaw", "Cargo Bike", "Other"]
+
+  // OTP screen colors based on active tab
+  const otpBubbleColor = loginTab === "whatsapp" ? "#25D366" : "#F97316"
+  const otpCheckMessage = loginTab === "whatsapp"
+    ? (language === "en" ? "Check your WhatsApp" : "अपना WhatsApp चेक करें")
+    : (language === "en" ? "Check your SMS messages" : "अपने SMS संदेश चेक करें")
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-[390px] min-h-[700px] bg-card rounded-3xl border border-border shadow-2xl overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-6 py-3 text-xs text-muted-foreground">
-          <span>9:41</span>
-          <div className="flex items-center gap-3">
-            <div className="flex bg-secondary rounded-md overflow-hidden text-[10px] font-medium">
-              <button
-                onClick={() => setLanguage("en")}
-                className={`px-2 py-1 transition-colors ${
-                  language === "en"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => setLanguage("hi")}
-                className={`px-2 py-1 transition-colors ${
-                  language === "hi"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                हिंदी
-              </button>
-            </div>
-            <div className="w-4 h-2 border border-muted-foreground rounded-sm">
-              <div className="w-3/4 h-full bg-accent rounded-sm" />
-            </div>
-          </div>
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Hidden QR camera input */}
+      <input
+        ref={qrInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleQRFile}
+      />
+
+      {/* Language toggle */}
+      <div className="flex justify-end px-4 pt-3">
+        <div className="flex bg-secondary rounded-md overflow-hidden text-[10px] font-medium border border-border">
+          <button
+            onClick={() => setLanguage("en")}
+            className={`px-3 py-1.5 transition-colors ${
+              language === "en" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            EN
+          </button>
+          <button
+            onClick={() => setLanguage("hi")}
+            className={`px-3 py-1.5 transition-colors ${
+              language === "hi" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            हिंदी
+          </button>
         </div>
+      </div>
 
-        <div className="flex-1 flex flex-col px-6 py-4">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-              <Truck className="w-8 h-8 text-primary" />
-            </div>
-            <h1 className="text-2xl font-bold text-foreground mb-1">{t.title}</h1>
-            <p className="text-sm text-muted-foreground">{t.subtitle}</p>
-          </div>
+      <div className="flex-1 flex flex-col px-6 py-4 max-w-md mx-auto w-full">
 
-          {screenState === "phone" ? (
-            <>
-              <div className="space-y-4 mb-6">
-                <div className="flex gap-2">
-                  <div className="flex items-center justify-center w-20 h-12 bg-input border border-border rounded-lg text-foreground font-medium">
-                    {countryCode}
-                  </div>
-                  <Input
-                    type="tel"
-                    placeholder={t.phonePlaceholder}
-                    value={phoneNumber}
-                    onChange={(e) => {
-                      setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))
-                      setError("")
-                    }}
-                    className="flex-1 h-12 bg-input border-border text-foreground placeholder:text-muted-foreground"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">{t.helperText}</p>
-              </div>
-
-              <div className="mb-6">
-                <div className="flex bg-secondary rounded-lg p-1">
-                  <button
-                    onClick={() => setOtpMethod("whatsapp")}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-md text-sm font-medium transition-all ${
-                      otpMethod === "whatsapp"
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    WhatsApp
-                  </button>
-                  <button
-                    onClick={() => setOtpMethod("sms")}
-                    className={`flex-1 py-3 rounded-md text-sm font-medium transition-all ${
-                      otpMethod === "sms"
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    SMS
-                  </button>
-                </div>
-              </div>
-
-              {error && <p className="text-destructive text-sm text-center mb-4">{error}</p>}
-
-              <Button
-                onClick={handleSendCode}
-                disabled={isLoading || phoneNumber.length < 10}
-                className="w-full h-14 text-base font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
+        {/* ── Screen 1: Phone ── */}
+        {screen === "phone" && (
+          <>
+            {/* Tab switcher */}
+            <div className="flex gap-2 mb-6 mt-2">
+              <button
+                onClick={() => { setLoginTab("whatsapp"); setPhoneError(""); setSentMsg(false) }}
+                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                  loginTab === "whatsapp"
+                    ? "text-white"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                style={loginTab === "whatsapp" ? { backgroundColor: "#25D366" } : {}}
               >
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                ) : (
-                  t.sendCode
-                )}
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="space-y-4 mb-6">
-                <p className="text-sm text-muted-foreground text-center">
-                  {t.enterCode} {countryCode} {phoneNumber}
-                </p>
+                <MessageCircle className="w-4 h-4" />
+                WhatsApp
+              </button>
+              <button
+                onClick={() => { setLoginTab("sms"); setPhoneError(""); setSentMsg(false) }}
+                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                  loginTab === "sms"
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                <Phone className="w-4 h-4" />
+                Phone / SMS
+              </button>
+            </div>
 
-                <div className="flex justify-center gap-2">
-                  {otp.map((digit, index) => (
-                    <input
-                      key={index}
-                      ref={(el) => {
-                        otpRefs.current[index] = el
+            {/* WhatsApp tab content */}
+            {loginTab === "whatsapp" && (
+              <>
+                <div className="text-center mb-8 mt-4">
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full mb-4" style={{ backgroundColor: "#25D366" }}>
+                    <MessageCircle className="w-10 h-10 text-white" fill="white" />
+                  </div>
+                  <h1 className="text-2xl font-bold text-foreground mb-1">
+                    {language === "en" ? "Login with WhatsApp" : "WhatsApp से लॉगिन करें"}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    {language === "en" ? "Enter your WhatsApp number to continue" : "जारी रखने के लिए WhatsApp नंबर दर्ज करें"}
+                  </p>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  <div className="flex gap-2">
+                    <div className="flex items-center justify-center w-20 h-14 bg-input border border-border rounded-xl text-foreground font-semibold text-sm">
+                      🇮🇳 +91
+                    </div>
+                    <Input
+                      type="tel"
+                      placeholder={language === "en" ? "10-digit number" : "10 अंकों का नंबर"}
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                        setPhoneError("")
                       }}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpChange(index, e.target.value)}
-                      onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className={`w-11 h-14 text-center text-xl font-bold bg-input border-2 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors ${
-                        error ? "border-destructive" : "border-border"
-                      }`}
+                      className="flex-1 h-14 bg-input border-border text-foreground placeholder:text-muted-foreground text-base rounded-xl"
                     />
+                  </div>
+                  {phoneError && <p className="text-destructive text-sm">{phoneError}</p>}
+                  {sentMsg && (
+                    <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: "#25D366" }}>
+                      <CheckCircle2 className="w-4 h-4" />
+                      {language === "en" ? "OTP sent to WhatsApp ✅" : "WhatsApp पर OTP भेजा गया ✅"}
+                    </p>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handleSendOTP}
+                  disabled={sending || phone.length < 10}
+                  className="w-full h-14 text-base font-bold rounded-xl text-white"
+                  style={{ backgroundColor: "#25D366" }}
+                >
+                  {sending ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      {language === "en" ? "Sending..." : "भेजा जा रहा है..."}
+                    </div>
+                  ) : (
+                    <>
+                      <MessageCircle className="w-5 h-5 mr-2" />
+                      {language === "en" ? "Send OTP via WhatsApp" : "WhatsApp पर OTP भेजें"}
+                    </>
+                  )}
+                </Button>
+
+                <p className="text-xs text-muted-foreground text-center mt-4">
+                  {language === "en"
+                    ? "We'll send a one-time code via WhatsApp"
+                    : "हम WhatsApp के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे"}
+                </p>
+              </>
+            )}
+
+            {/* SMS tab content */}
+            {loginTab === "sms" && (
+              <>
+                <div className="text-center mb-8 mt-4">
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 bg-primary">
+                    <Phone className="w-10 h-10 text-white" />
+                  </div>
+                  <h1 className="text-2xl font-bold text-foreground mb-1">
+                    {language === "en" ? "Login with Phone" : "फोन से लॉगिन करें"}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    {language === "en" ? "We'll send a verification code via SMS" : "हम SMS के माध्यम से सत्यापन कोड भेजेंगे"}
+                  </p>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  <div className="flex gap-2">
+                    <div className="flex items-center justify-center w-20 h-14 bg-input border border-border rounded-xl text-foreground font-semibold text-sm">
+                      🇮🇳 +91
+                    </div>
+                    <Input
+                      type="tel"
+                      placeholder={language === "en" ? "10-digit number" : "10 अंकों का नंबर"}
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                        setPhoneError("")
+                      }}
+                      className="flex-1 h-14 bg-input border-border text-foreground placeholder:text-muted-foreground text-base rounded-xl"
+                    />
+                  </div>
+                  {phoneError && <p className="text-destructive text-sm">{phoneError}</p>}
+                  {sentMsg && (
+                    <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: "#F97316" }}>
+                      <CheckCircle2 className="w-4 h-4" />
+                      {language === "en" ? "OTP sent via SMS ✅" : "SMS पर OTP भेजा गया ✅"}
+                    </p>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handleSendOTP}
+                  disabled={sending || phone.length < 10}
+                  className="w-full h-14 text-base font-bold rounded-xl text-white"
+                  style={{ backgroundColor: "#F97316" }}
+                >
+                  {sending ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      {language === "en" ? "Sending..." : "भेजा जा रहा है..."}
+                    </div>
+                  ) : (
+                    <>
+                      <Phone className="w-5 h-5 mr-2" />
+                      {language === "en" ? "Send OTP via SMS" : "SMS पर OTP भेजें"}
+                    </>
+                  )}
+                </Button>
+
+                <p className="text-xs text-muted-foreground text-center mt-4">
+                  {language === "en"
+                    ? "We'll send a one-time code via SMS"
+                    : "हम SMS के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे"}
+                </p>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ── Screen 2: OTP ── */}
+        {screen === "otp" && (
+          <>
+            <div className="text-center mb-6 mt-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-3" style={{ backgroundColor: otpBubbleColor }}>
+                {loginTab === "whatsapp"
+                  ? <MessageCircle className="w-8 h-8 text-white" fill="white" />
+                  : <Phone className="w-8 h-8 text-white" />
+                }
+              </div>
+              <h1 className="text-xl font-bold text-foreground mb-1">
+                {language === "en" ? "Enter OTP" : "OTP दर्ज करें"}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {language === "en" ? `Sent to +91 ${phone}` : `+91 ${phone} पर भेजा गया`}
+              </p>
+            </div>
+
+            {/* Message bubble */}
+            <div className="mb-6 flex justify-start">
+              <div className="rounded-2xl rounded-tl-none px-4 py-3 max-w-[85%]" style={{ backgroundColor: otpBubbleColor }}>
+                <p className="text-white text-xs font-medium mb-1">RakAshi Driver</p>
+                <p className="text-white text-sm">
+                  {language === "en"
+                    ? "Your RakAshi verification code: "
+                    : "आपका RakAshi सत्यापन कोड: "}
+                  <span className="font-black tracking-widest">██████</span>
+                </p>
+                <p className="text-white/80 text-xs mt-1">
+                  {otpCheckMessage}
+                </p>
+                <p className="text-white/60 text-[10px] mt-1 text-right">
+                  {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            </div>
+
+            {/* OTP boxes */}
+            <div className="flex justify-center gap-2 mb-4">
+              {otp.map((digit, i) => (
+                <input
+                  key={i}
+                  ref={(el) => { otpRefs.current[i] = el }}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(e) => handleOtpChange(i, e.target.value)}
+                  onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                  className={`w-12 h-14 text-center text-2xl font-bold bg-input border-2 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors ${
+                    otpError ? "border-destructive" : "border-border"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {otpError && <p className="text-destructive text-sm text-center mb-3">{otpError}</p>}
+
+            <Button
+              onClick={handleVerifyOTP}
+              disabled={verifying || !isOtpComplete}
+              className="w-full h-14 text-base font-bold rounded-xl bg-primary hover:bg-primary/90 text-white mb-4"
+            >
+              {verifying ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  {language === "en" ? "Verifying..." : "सत्यापित हो रहा है..."}
+                </div>
+              ) : (
+                language === "en" ? "Verify OTP" : "OTP सत्यापित करें"
+              )}
+            </Button>
+
+            {/* Resend */}
+            <div className="flex items-center justify-center gap-3 text-sm">
+              <button
+                onClick={handleResendOTP}
+                disabled={resendTimer > 0}
+                className={resendTimer > 0 ? "text-muted-foreground" : "text-primary hover:underline"}
+              >
+                {resendTimer > 0
+                  ? `${language === "en" ? "Resend in" : "पुनः भेजें"} 0:${resendTimer.toString().padStart(2, "0")}`
+                  : (language === "en" ? "Resend OTP" : "OTP पुनः भेजें")}
+              </button>
+              <span className="text-border">·</span>
+              <button
+                onClick={() => { setScreen("phone"); setOtp(["", "", "", "", "", ""]); setOtpError("") }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {language === "en" ? "Change number" : "नंबर बदलें"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── Screen 3: Profile Registration ── */}
+        {screen === "profile" && (
+          <>
+            <div className="text-center mb-6 mt-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-3">
+                <Truck className="w-8 h-8 text-primary" />
+              </div>
+              <h1 className="text-xl font-bold text-foreground mb-1">
+                {language === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {language === "en" ? "Tell us about yourself" : "अपने बारे में बताएं"}
+              </p>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              {/* Name */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">
+                  {language === "en" ? "Your name" : "आपका नाम"}
+                </label>
+                <Input
+                  type="text"
+                  placeholder={language === "en" ? "Enter your full name" : "अपना पूरा नाम दर्ज करें"}
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); setNameError("") }}
+                  className="h-14 bg-input border-border text-foreground placeholder:text-muted-foreground rounded-xl text-base"
+                />
+                {nameError && <p className="text-destructive text-xs mt-1">{nameError}</p>}
+              </div>
+
+              {/* Vehicle type */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">
+                  {language === "en" ? "Vehicle type" : "वाहन का प्रकार"}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {vehicleOptions.map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setVehicleType(v)}
+                      className={`h-12 rounded-xl text-sm font-medium border transition-colors ${
+                        vehicleType === v
+                          ? "bg-primary text-white border-primary"
+                          : "bg-input border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {v === "E-Rickshaw" ? "🛺 " + v : v === "Cargo Bike" ? "🚲 " + v : "🚐 " + v}
+                    </button>
                   ))}
                 </div>
-
-                <div className="text-center space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    {t.resendIn} <span className="font-mono text-foreground">{formatTimer(timer)}</span>
-                  </p>
-                  <button
-                    onClick={handleResendCode}
-                    disabled={timer > 0}
-                    className={`text-sm font-medium ${
-                      timer > 0 ? "text-muted-foreground cursor-not-allowed" : "text-primary hover:underline"
-                    }`}
-                  >
-                    {t.resendCode}
-                  </button>
-                  <span className="mx-2 text-muted-foreground">·</span>
-                  <button
-                    onClick={() => setOtpMethod(otpMethod === "whatsapp" ? "sms" : "whatsapp")}
-                    className="text-sm font-medium text-primary hover:underline"
-                  >
-                    {t.useInstead.replace("{method}", otpMethod === "whatsapp" ? "SMS" : "WhatsApp")}
-                  </button>
-                </div>
               </div>
 
-              {error && <p className="text-destructive text-sm text-center mb-4">{error}</p>}
-
-              <Button
-                onClick={handleVerifyOtp}
-                disabled={isLoading || !isOtpComplete}
-                className="w-full h-14 text-base font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+              {/* QR scan */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">
+                  {language === "en" ? "Vehicle QR Code (optional)" : "वाहन QR कोड (वैकल्पिक)"}
+                </label>
+                {vehicleCode ? (
+                  <div className="h-14 flex items-center gap-2 px-4 rounded-xl bg-green-500/10 border border-green-500/30">
+                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                    <span className="text-sm text-green-500 font-medium">
+                      {language === "en" ? "Vehicle linked ✅" : "वाहन लिंक किया गया ✅"} {vehicleCode}
+                    </span>
+                  </div>
                 ) : (
-                  t.continue
+                  <button
+                    onClick={handleQRScan}
+                    disabled={scanning}
+                    className="w-full h-14 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border text-muted-foreground hover:text-foreground hover:border-primary transition-colors text-sm font-medium"
+                  >
+                    {scanning ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                        {language === "en" ? "Scanning..." : "स्कैन हो रहा है..."}
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-5 h-5" />
+                        {language === "en" ? "Scan Vehicle QR Code" : "वाहन QR कोड स्कैन करें"}
+                      </>
+                    )}
+                  </button>
                 )}
-              </Button>
+              </div>
+            </div>
 
-              <button
-                onClick={() => {
-                  setScreenState("phone")
-                  setOtp(["", "", "", "", "", ""])
-                  setError("")
-                }}
-                className="mt-4 text-sm text-muted-foreground hover:text-foreground text-center"
-              >
-                ← {t.changePhone}
-              </button>
-            </>
-          )}
-
-          <div className="flex-1" />
-
-          <div className="space-y-4 pb-4">
-            <p className="text-xs text-muted-foreground text-center">
-              {t.termsText}{" "}
-              <span className="text-foreground hover:underline cursor-pointer">{t.terms}</span>
-              {" & "}
-              <span className="text-foreground hover:underline cursor-pointer">{t.privacy}</span>.
-            </p>
-
-            <button
-              onClick={handleDemoLogin}
-              className="w-full py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            <Button
+              onClick={handleCompleteRegistration}
+              disabled={saving || !name.trim()}
+              className="w-full h-14 text-base font-bold rounded-xl bg-primary hover:bg-primary/90 text-white"
             >
-              {t.demoLogin}
-            </button>
-          </div>
-        </div>
+              {saving ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  {language === "en" ? "Saving..." : "सहेजा जा रहा है..."}
+                </div>
+              ) : (
+                language === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"
+              )}
+            </Button>
+          </>
+        )}
 
-        <div className="flex justify-center pb-2">
-          <div className="w-32 h-1 bg-muted-foreground/30 rounded-full" />
-        </div>
+        {/* Demo shortcut */}
+        {screen === "phone" && (
+          <button
+            onClick={() => {
+              document.cookie = "rakashi-auth=1; path=/; max-age=86400"
+              router.push("/dashboard")
+            }}
+            className="mt-6 w-full py-3 text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+          >
+            {language === "en" ? "Demo login (skip OTP)" : "डेमो लॉगिन (OTP छोड़ें)"}
+          </button>
+        )}
       </div>
     </div>
   )

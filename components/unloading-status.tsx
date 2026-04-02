@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Truck, Package, CheckCircle2, Bell, MapPin, User, Box, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,10 +29,12 @@ function formatTime(seconds: number): string {
 type Language = "en" | "hi";
 
 export function UnloadingStatus() {
+  const router = useRouter();
   const [state, setState] = useState<UnloadingState>("waiting");
   const [elapsedTime, setElapsedTime] = useState(0);
   const [shipperNotified, setShipperNotified] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
+  const [showCompletionBanner, setShowCompletionBanner] = useState(false);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -41,6 +44,16 @@ export function UnloadingStatus() {
       }, 1000);
     }
     return () => clearInterval(interval);
+  }, [state]);
+
+  useEffect(() => {
+    if (state === "completed") {
+      setShowCompletionBanner(true);
+      const timer = setTimeout(() => {
+        router.push("/dashboard");
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
   }, [state]);
 
   const handlePrimaryAction = useCallback(() => {
@@ -70,16 +83,20 @@ export function UnloadingStatus() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      {/* Phone Frame */}
-      <div className="relative w-full max-w-[390px] overflow-hidden rounded-[40px] border-4 border-border bg-card shadow-2xl">
-        {/* Notch */}
-        <div className="absolute left-1/2 top-2 z-10 h-6 w-28 -translate-x-1/2 rounded-full bg-background" />
+    <div className="min-h-screen bg-background relative">
+        {/* Completion Banner */}
+        {showCompletionBanner && (
+          <div className="fixed top-0 left-0 right-0 z-50 bg-green-500 text-white text-center py-4 px-4 font-bold text-sm animate-slide-down">
+            {language === "en"
+              ? "Delivery report sent to shipper! Great work! 🎉"
+              : "शिपर को रिपोर्ट भेजी गई! शाबाश! 🎉"}
+          </div>
+        )}
 
         {/* Screen Content */}
-        <div className="flex h-[750px] flex-col px-6 pb-8 pt-12">
+        <div className="flex flex-col min-h-screen px-6 pb-4 pt-4">
           {/* Header Section */}
-          <div className="mb-6">
+          <div className="mb-2">
             {/* Language Switcher */}
             <div className="mb-3 flex justify-end">
               <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5">
@@ -119,7 +136,7 @@ export function UnloadingStatus() {
           </div>
 
           {/* Progress Steps */}
-          <div className="mb-6">
+          <div className="mb-2">
             <div className="flex items-center justify-between">
               {[
                 { step: 1, label: "Arrival", icon: MapPin },
@@ -177,12 +194,12 @@ export function UnloadingStatus() {
           </div>
 
           {/* Main Status Card */}
-          <div className="mb-4 rounded-2xl border border-border bg-muted/50 p-4">
+          <div className="mb-2 rounded-2xl border border-border bg-muted/50 p-3">
             <div className="flex h-full flex-col items-center justify-center text-center">
               {state === "waiting" && (
                 <>
-                  <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-secondary">
-                    <Truck className="h-10 w-10 text-muted-foreground" />
+                  <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-secondary">
+                    <Truck className="h-7 w-7 text-muted-foreground" />
                   </div>
                   <h2 className="mb-1 text-lg font-semibold text-foreground">
                     Ready to Unload
@@ -195,9 +212,9 @@ export function UnloadingStatus() {
 
               {state === "in-progress" && (
                 <>
-                  <div className="relative mb-4">
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-primary bg-primary/10">
-                      <Package className="h-10 w-10 animate-pulse text-primary" />
+                  <div className="relative mb-2">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-primary bg-primary/10">
+                      <Package className="h-7 w-7 animate-pulse text-primary" />
                     </div>
                     <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-0.5 text-xs font-bold text-primary-foreground">
                       ACTIVE
@@ -206,7 +223,7 @@ export function UnloadingStatus() {
                   <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
                     Unloading time
                   </p>
-                  <p className="font-mono text-4xl font-bold tracking-tight text-foreground">
+                  <p className="font-mono text-3xl font-bold tracking-tight text-foreground">
                     {formatTime(elapsedTime)}
                   </p>
                 </>
@@ -214,8 +231,8 @@ export function UnloadingStatus() {
 
               {state === "completed" && (
                 <>
-                  <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-success/20">
-                    <CheckCircle2 className="h-12 w-12 text-success" />
+                  <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-success/20">
+                    <CheckCircle2 className="h-9 w-9 text-success" />
                   </div>
                   <h2 className="mb-1 text-lg font-semibold text-foreground">
                     Unloading Complete
@@ -235,7 +252,7 @@ export function UnloadingStatus() {
           </div>
 
           {/* Delivery Info Panel */}
-          <div className="mb-3 space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+          <div className="mb-2 space-y-2 rounded-xl border border-border bg-muted/30 p-2">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-secondary">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -272,7 +289,7 @@ export function UnloadingStatus() {
           </div>
 
           {/* Trust Score XP Panel */}
-          <div className="mb-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+          <div className="mb-2 rounded-xl border border-primary/30 bg-primary/5 p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20">
@@ -284,7 +301,7 @@ export function UnloadingStatus() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-bold text-foreground">87</span>
-                <span className="text-xs font-medium text-primary">+3 XP</span>
+                <span className={cn("text-xs font-medium", state === "completed" ? "animate-pulse text-green-500 font-bold text-base" : "text-primary")}>+3 XP</span>
               </div>
             </div>
             <div className="mb-2 flex items-center gap-2">
@@ -294,8 +311,8 @@ export function UnloadingStatus() {
                   className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all duration-500"
                   style={{ width: "70%" }}
                 />
-                <div 
-                  className="absolute inset-y-0 rounded-full bg-primary/50"
+                <div
+                  className={cn("absolute inset-y-0 rounded-full bg-primary/50", state === "completed" && "animate-pulse")}
                   style={{ left: "70%", width: "10%" }}
                 />
               </div>
@@ -309,11 +326,11 @@ export function UnloadingStatus() {
           </div>
 
           {/* Action Buttons */}
-          <div className="space-y-2">
+          <div className="mt-4 space-y-2">
             {state !== "completed" && (
               <Button
                 onClick={handlePrimaryAction}
-                className="h-12 w-full text-base font-semibold"
+                className="h-14 w-full text-base font-bold rounded-xl"
                 size="lg"
               >
                 {state === "waiting" 
@@ -340,25 +357,9 @@ export function UnloadingStatus() {
               </div>
             )}
 
-            {state === "completed" && (
-              <Button
-                onClick={() => {
-                  setState("waiting");
-                  setElapsedTime(0);
-                  setShipperNotified(false);
-                }}
-                variant="secondary"
-                className="h-12 w-full text-sm font-medium"
-              >
-                Reset Demo
-              </Button>
-            )}
           </div>
         </div>
 
-        {/* Home Indicator */}
-        <div className="absolute bottom-2 left-1/2 h-1 w-32 -translate-x-1/2 rounded-full bg-foreground/30" />
-      </div>
     </div>
   );
 }

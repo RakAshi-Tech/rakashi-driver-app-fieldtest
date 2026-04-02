@@ -13,7 +13,7 @@ export default function CompletionPage() {
         <UnloadingStatus />
 
         <Button
-          className="w-full h-12 text-sm font-semibold"
+          className="w-full h-14 text-base font-bold rounded-xl"
           onClick={() => router.push("/dashboard")}
         >
           Back to Dashboard

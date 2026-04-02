@@ -12,7 +12,7 @@ export function DirectionArrow() {
 
   return (
     <section
-      className="flex flex-col items-center gap-2 py-4"
+      className="flex flex-col items-center gap-1.5 py-2"
       aria-label="Direction indicator pointing to entrance"
     >
       {/* AR-like large arrow */}
@@ -24,8 +24,8 @@ export function DirectionArrow() {
           }`}
         />
         <svg
-          width="80"
-          height="80"
+          width="64"
+          height="64"
           viewBox="0 0 80 80"
           fill="none"
           className="relative drop-shadow-[0_0_12px_rgba(234,179,8,0.6)]"
@@ -49,12 +49,12 @@ export function DirectionArrow() {
 
       {/* Distance callout */}
       <div className="flex items-baseline gap-1.5">
-        <span className="text-3xl font-black text-primary">12</span>
-        <span className="text-base font-bold text-primary/70">m ahead</span>
+        <span className="text-2xl font-black text-primary">12</span>
+        <span className="text-sm font-bold text-primary/70">m ahead</span>
       </div>
 
       {/* Door-level label */}
-      <span className="rounded-lg bg-primary/15 px-3 py-1 text-xs font-black uppercase tracking-widest text-primary">
+      <span className="rounded-lg bg-primary/15 px-3 py-0.5 text-xs font-black uppercase tracking-widest text-primary">
         Door-level precision
       </span>
     </section>

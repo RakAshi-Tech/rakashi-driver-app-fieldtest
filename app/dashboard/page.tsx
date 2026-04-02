@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { DriverProfileCard } from "@/components/driver-profile-card"
 import { TrustScoreCard } from "@/components/trust-score-card"
 import { TodayJobsList, type Job } from "@/components/today-jobs-list"
+import { CompletedJobsList } from "@/components/completed-jobs-list"
 import { Button } from "@/components/ui/button"
 import { Truck } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 
 const mockDriverData = {
   name: "Rajaram Kumar",
@@ -53,7 +55,28 @@ const mockJobs: Job[] = [
 export default function HomePage() {
   const router = useRouter()
   const [language, setLanguage] = useState<"en" | "hi">("en")
+  const [driverProfile, setDriverProfile] = useState<any>(null)
 
+  useEffect(() => {
+    const loadProfile = async () => {
+      const phone = localStorage.getItem("rakashi_phone")
+      if (!phone) return
+
+      const { data, error } = await supabase
+        .from("driver_profiles")
+        .select("*")
+        .eq("phone_number", phone)
+        .single()
+
+      if (data) {
+        setDriverProfile(data)
+      }
+    }
+    loadProfile()
+  }, [])
+
+  const activeJobs = mockJobs.filter((job) => job.status !== "done")
+  const completedJobs = mockJobs.filter((job) => job.status === "done")
   const firstPendingJob = mockJobs.find((job) => job.status === "pending")
 
   const handleStartNextJob = () => {
@@ -61,26 +84,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      {/* Phone Frame */}
-      <div className="w-full max-w-[390px] h-[844px] bg-background rounded-[2.5rem] border-4 border-border shadow-2xl overflow-hidden flex flex-col">
-        {/* Status Bar Mock */}
-        <div className="h-11 bg-card flex items-center justify-between px-6 shrink-0">
-          <span className="text-[11px] font-medium text-foreground">9:41</span>
-          <div className="flex items-center gap-1">
-            <div className="flex gap-0.5">
-              <div className="w-1 h-1 rounded-full bg-foreground" />
-              <div className="w-1 h-1 rounded-full bg-foreground" />
-              <div className="w-1 h-1 rounded-full bg-foreground" />
-              <div className="w-1 h-1 rounded-full bg-muted-foreground/50" />
-            </div>
-            <span className="text-[11px] text-foreground ml-1">5G</span>
-            <div className="w-6 h-3 border border-foreground rounded-sm ml-1 relative">
-              <div className="absolute inset-0.5 bg-primary rounded-[1px]" style={{ width: "70%" }} />
-            </div>
-          </div>
-        </div>
-
+    <div className="min-h-screen bg-background flex flex-col">
         {/* Header with Language Toggle */}
         <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
           <div className="flex items-center gap-2">
@@ -116,14 +120,18 @@ export default function HomePage() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col p-3 gap-3 overflow-hidden">
           {/* Driver Profile Card */}
-          <DriverProfileCard {...mockDriverData} />
+          <DriverProfileCard
+            {...mockDriverData}
+            name={driverProfile?.name ?? mockDriverData.name}
+          />
 
           {/* Trust Score Card */}
-          <TrustScoreCard score={87} trend="up" />
+          <TrustScoreCard score={driverProfile?.trust_score ?? 87} trend="up" />
 
           {/* Today's Jobs */}
-          <div className="flex-1 min-h-0">
-            <TodayJobsList jobs={mockJobs} />
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
+            <TodayJobsList jobs={activeJobs} />
+            <CompletedJobsList jobs={completedJobs} />
           </div>
         </div>
 
@@ -132,17 +140,12 @@ export default function HomePage() {
           <Button
             onClick={handleStartNextJob}
             disabled={!firstPendingJob}
-            className="w-full h-12 text-sm font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+            className="w-full h-14 text-base font-bold rounded-xl bg-primary hover:bg-primary/90 text-white"
           >
             {firstPendingJob ? "Start next job" : "No pending jobs"}
           </Button>
         </div>
 
-        {/* Home Indicator */}
-        <div className="h-8 flex items-center justify-center shrink-0">
-          <div className="w-32 h-1 bg-foreground/30 rounded-full" />
-        </div>
-      </div>
     </div>
   )
 }
