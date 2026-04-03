@@ -3,7 +3,19 @@
 import { useState, useEffect } from "react"
 import { useLang } from "@/app/context/LanguageContext"
 
-export function DirectionArrow() {
+interface DirectionArrowProps {
+  distanceMeters: number | null
+  bearingDeg: number | null
+}
+
+function formatDistance(meters: number): { value: string; unit: string; isKm: boolean } {
+  if (meters < 1000) {
+    return { value: String(Math.round(meters)), unit: "", isKm: false }
+  }
+  return { value: (meters / 1000).toFixed(1), unit: " km", isKm: true }
+}
+
+export function DirectionArrow({ distanceMeters, bearingDeg }: DirectionArrowProps) {
   const { t } = useLang()
   const [pulse, setPulse] = useState(false)
 
@@ -12,13 +24,21 @@ export function DirectionArrow() {
     return () => clearInterval(interval)
   }, [])
 
+  const distFormatted = distanceMeters != null ? formatDistance(distanceMeters) : null
+
   return (
     <section
       className="flex flex-col items-center gap-1.5 py-2"
       aria-label="Direction indicator pointing to entrance"
     >
-      {/* AR-like large arrow */}
-      <div className="relative">
+      {/* AR-like large arrow — rotates toward destination */}
+      <div
+        className="relative"
+        style={{
+          transform: bearingDeg != null ? `rotate(${bearingDeg}deg)` : undefined,
+          transition: "transform 0.6s ease",
+        }}
+      >
         {/* Glow ring */}
         <div
           className={`absolute -inset-3 rounded-full bg-primary/20 transition-all duration-700 ${
@@ -49,15 +69,29 @@ export function DirectionArrow() {
         </svg>
       </div>
 
-      {/* Distance callout */}
+      {/* Distance callout — live GPS value */}
       <div className="flex items-baseline gap-1.5">
-        <span className="text-2xl font-black text-primary">12</span>
-        <span className="text-sm font-bold text-primary/70">{t('mAhead')}</span>
+        {distFormatted != null ? (
+          distFormatted.isKm ? (
+            <span className="text-2xl font-black text-primary">
+              {distFormatted.value}{distFormatted.unit}
+            </span>
+          ) : (
+            <>
+              <span className="text-2xl font-black text-primary">
+                {distFormatted.value}
+              </span>
+              <span className="text-sm font-bold text-primary/70">{t("mAhead")}</span>
+            </>
+          )
+        ) : (
+          <span className="text-2xl font-black text-primary/40">—</span>
+        )}
       </div>
 
       {/* Door-level label */}
       <span className="rounded-lg bg-primary/15 px-3 py-0.5 text-xs font-black uppercase tracking-widest text-primary">
-        {t('doorLevelPrecision')}
+        {t("doorLevelPrecision")}
       </span>
     </section>
   )

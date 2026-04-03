@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react"
 import { Navigation } from "lucide-react"
 import { useLang } from "@/app/context/LanguageContext"
 
-const DESTINATION = { lat: 35.6595, lng: 139.7004 }
-
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim()
 }
@@ -23,10 +21,25 @@ export function LocalInstructions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [animate, setAnimate] = useState(false)
+  const [destination, setDestination] = useState<{ lat: number; lng: number } | null>(null)
+
   const prevInstructionRef = useRef<string>("")
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchRoute = () => {
+  // Load destination from localStorage (replaces hardcoded coordinates)
+  useEffect(() => {
+    const saved = localStorage.getItem("destination")
+    if (saved) {
+      const d = JSON.parse(saved)
+      setDestination({ lat: d.lat, lng: d.lng })
+    } else {
+      // No destination saved — show error immediately
+      setError(true)
+      setLoading(false)
+    }
+  }, [])
+
+  const fetchRoute = (dest: { lat: number; lng: number }) => {
     if (!navigator.geolocation) {
       setError(true)
       setLoading(false)
@@ -37,9 +50,9 @@ export function LocalInstructions() {
       async (pos) => {
         try {
           const origin = `${pos.coords.latitude},${pos.coords.longitude}`
-          const destination = `${DESTINATION.lat},${DESTINATION.lng}`
+          const destinationParam = `${dest.lat},${dest.lng}`
           const res = await fetch(
-            `/api/directions?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&language=${language}`
+            `/api/directions?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destinationParam)}&language=${language}`
           )
           const data = await res.json()
 
@@ -78,27 +91,33 @@ export function LocalInstructions() {
     )
   }
 
+  // Start polling once destination is loaded; restart if language changes
   useEffect(() => {
-    fetchRoute()
-    intervalRef.current = setInterval(fetchRoute, 3000)
+    if (!destination) return
+
+    if (intervalRef.current) clearInterval(intervalRef.current)
+
+    fetchRoute(destination)
+    intervalRef.current = setInterval(() => fetchRoute(destination), 3000)
+
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [language])
+  }, [destination, language])
 
   return (
     <section className="px-4 py-1" aria-label="Navigation instructions">
       <h2 className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-        {t('nextStep')}
+        {t("nextStep")}
       </h2>
 
       {loading ? (
         <div className="rounded-lg bg-secondary/50 p-4 text-sm text-muted-foreground animate-pulse">
-          {t('routeLoading')}
+          {t("routeLoading")}
         </div>
       ) : error ? (
         <div className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">
-          {t('routeError')}
+          {t("routeError")}
         </div>
       ) : step ? (
         <div
@@ -124,8 +143,12 @@ export function LocalInstructions() {
 
           {(step.totalDistance || step.totalDuration) && (
             <div className="flex items-center gap-3 pt-1 border-t border-border/50 text-xs text-muted-foreground">
-              {step.totalDistance && <span className="text-accent">📍 {step.totalDistance}</span>}
-              {step.totalDuration && <span className="text-accent">⏱ {step.totalDuration}</span>}
+              {step.totalDistance && (
+                <span className="text-accent">📍 {step.totalDistance}</span>
+              )}
+              {step.totalDuration && (
+                <span className="text-accent">⏱ {step.totalDuration}</span>
+              )}
             </div>
           )}
         </div>
