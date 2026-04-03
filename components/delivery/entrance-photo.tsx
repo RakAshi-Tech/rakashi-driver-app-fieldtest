@@ -1,16 +1,17 @@
 "use client"
 
 import { Eye } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 const DEFAULT_CENTER = { lat: 35.6595, lng: 139.7004 }
 
 interface EntrancePhotoProps {
   latitude?: number
   longitude?: number
-  language?: string
 }
 
-export function EntrancePhoto({ latitude, longitude, language }: EntrancePhotoProps) {
+export function EntrancePhoto({ latitude, longitude }: EntrancePhotoProps) {
+  const { t } = useLang()
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   const lat = latitude ?? DEFAULT_CENTER.lat
   const lng = longitude ?? DEFAULT_CENTER.lng
@@ -21,7 +22,7 @@ export function EntrancePhoto({ latitude, longitude, language }: EntrancePhotoPr
       <div className="relative h-36 w-full overflow-hidden">
         {!apiKey ? (
           <div className="flex h-full w-full items-center justify-center bg-secondary text-sm text-foreground">
-            {language === "hi" ? "Street View उपलब्ध नहीं" : "Street Viewデータがありません"}
+            {t('streetViewUnavailable')}
           </div>
         ) : (
           <>
@@ -40,7 +41,7 @@ export function EntrancePhoto({ latitude, longitude, language }: EntrancePhotoPr
               className="absolute inset-0 items-center justify-center bg-secondary text-sm text-foreground"
               style={{ display: "none" }}
             >
-              {language === "hi" ? "Street View उपलब्ध नहीं" : "Street Viewデータがありません"}
+              {t('streetViewUnavailable')}
             </div>
           </>
         )}
@@ -61,7 +62,7 @@ export function EntrancePhoto({ latitude, longitude, language }: EntrancePhotoPr
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 px-4 py-2">
         <Eye className="h-5 w-5 text-primary" />
         <span className="text-sm font-black uppercase tracking-widest text-primary">
-          Match this entrance
+          {t('matchEntrance')}
         </span>
         <Eye className="h-5 w-5 text-primary" />
       </div>

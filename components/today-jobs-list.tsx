@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Package, ChevronRight } from "lucide-react"
 import Link from "next/link"
+import { useLang } from "@/app/context/LanguageContext"
 
 export interface Job {
   id: string
@@ -18,24 +19,26 @@ interface TodayJobsListProps {
 }
 
 export function TodayJobsList({ jobs }: TodayJobsListProps) {
+  const { t } = useLang()
+
   const getStatusBadge = (status: Job["status"]) => {
     switch (status) {
       case "pending":
         return (
           <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-accent text-accent">
-            Pending
+            {t('pending')}
           </Badge>
         )
       case "in_progress":
         return (
           <Badge className="text-[9px] px-1.5 py-0 bg-primary/20 text-primary border-0">
-            In Progress
+            {t('inProgress')}
           </Badge>
         )
       case "done":
         return (
           <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-            Done
+            {t('done')}
           </Badge>
         )
     }
@@ -45,13 +48,13 @@ export function TodayJobsList({ jobs }: TodayJobsListProps) {
     <div className="bg-card rounded-lg border border-border overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">
-          Today&apos;s Jobs
+          {t('todayJobs')}
         </h3>
         <Link
           href="/history"
           className="text-[10px] text-primary hover:underline"
         >
-          View all
+          {t('viewAll')}
         </Link>
       </div>
 
@@ -74,9 +77,9 @@ export function TodayJobsList({ jobs }: TodayJobsListProps) {
                 {getStatusBadge(job.status)}
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
-                <span>Block {job.blockNumber}</span>
+                <span>{t('block')} {job.blockNumber}</span>
                 <span>•</span>
-                <span>{job.quantity} items</span>
+                <span>{job.quantity} {t('items')}</span>
               </div>
             </div>
 

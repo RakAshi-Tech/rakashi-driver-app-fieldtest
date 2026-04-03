@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Truck, Package, CheckCircle2, Bell, MapPin, User, Box, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useLang } from "@/app/context/LanguageContext";
+import { LangToggle } from "@/app/components/LangToggle";
 
 type UnloadingState = "waiting" | "in-progress" | "completed";
 
@@ -26,14 +28,12 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 
-type Language = "en" | "hi";
-
 export function UnloadingStatus() {
   const router = useRouter();
+  const { t } = useLang();
   const [state, setState] = useState<UnloadingState>("waiting");
   const [elapsedTime, setElapsedTime] = useState(0);
   const [shipperNotified, setShipperNotified] = useState(false);
-  const [language, setLanguage] = useState<Language>("en");
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
 
   useEffect(() => {
@@ -82,14 +82,18 @@ export function UnloadingStatus() {
     return "pending";
   };
 
+  const steps = [
+    { step: 1, label: t('arrivalStep'), icon: MapPin },
+    { step: 2, label: t('unloadingStep'), icon: Package },
+    { step: 3, label: t('completedStep'), icon: CheckCircle2 },
+  ];
+
   return (
     <div className="min-h-screen bg-background relative">
         {/* Completion Banner */}
         {showCompletionBanner && (
           <div className="fixed top-0 left-0 right-0 z-50 bg-green-500 text-white text-center py-4 px-4 font-bold text-sm animate-slide-down">
-            {language === "en"
-              ? "Delivery report sent to shipper! Great work! 🎉"
-              : "शिपर को रिपोर्ट भेजी गई! शाबाश! 🎉"}
+            {t('deliveryReportSent')}
           </div>
         )}
 
@@ -99,38 +103,15 @@ export function UnloadingStatus() {
           <div className="mb-2">
             {/* Language Switcher */}
             <div className="mb-3 flex justify-end">
-              <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5">
-                <button
-                  onClick={() => setLanguage("en")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
-                    language === "en"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  EN
-                </button>
-                <button
-                  onClick={() => setLanguage("hi")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
-                    language === "hi"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  हिंदी
-                </button>
-              </div>
+              <LangToggle />
             </div>
             <div className="text-center">
               <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-success/20 px-3 py-1 text-xs font-medium text-success">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                {language === "en" ? "Arrival confirmed" : "आगमन की पुष्टि"}
+                {t('arrivalConfirmed')}
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                {language === "en" ? "Begin unloading the goods" : "सामान उतारना शुरू करें"}
+                {t('beginUnloading')}
               </p>
             </div>
           </div>
@@ -138,11 +119,7 @@ export function UnloadingStatus() {
           {/* Progress Steps */}
           <div className="mb-2">
             <div className="flex items-center justify-between">
-              {[
-                { step: 1, label: "Arrival", icon: MapPin },
-                { step: 2, label: "Unloading", icon: Package },
-                { step: 3, label: "Completed", icon: CheckCircle2 },
-              ].map((item, index) => {
+              {steps.map((item, index) => {
                 const status = getStepStatus(item.step);
                 const Icon = item.icon;
                 return (
@@ -202,10 +179,10 @@ export function UnloadingStatus() {
                     <Truck className="h-7 w-7 text-muted-foreground" />
                   </div>
                   <h2 className="mb-1 text-lg font-semibold text-foreground">
-                    Ready to Unload
+                    {t('readyToUnload')}
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    Tap the button below to start unloading
+                    {t('tapToStart')}
                   </p>
                 </>
               )}
@@ -221,7 +198,7 @@ export function UnloadingStatus() {
                     </div>
                   </div>
                   <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-                    Unloading time
+                    {t('unloadingTime')}
                   </p>
                   <p className="font-mono text-3xl font-bold tracking-tight text-foreground">
                     {formatTime(elapsedTime)}
@@ -235,15 +212,15 @@ export function UnloadingStatus() {
                     <CheckCircle2 className="h-9 w-9 text-success" />
                   </div>
                   <h2 className="mb-1 text-lg font-semibold text-foreground">
-                    Unloading Complete
+                    {t('unloadingComplete')}
                   </h2>
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Total time: {formatTime(elapsedTime)}
+                    {t('totalTime')} {formatTime(elapsedTime)}
                   </p>
                   {shipperNotified && (
                     <div className="inline-flex items-center gap-1.5 rounded-full bg-success/20 px-3 py-1.5 text-xs font-medium text-success">
                       <Bell className="h-3.5 w-3.5" />
-                      Shipper has been notified
+                      {t('shipperNotifiedMsg')}
                     </div>
                   )}
                 </>
@@ -258,7 +235,7 @@ export function UnloadingStatus() {
                 <MapPin className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted-foreground">Delivery location</p>
+                <p className="text-xs text-muted-foreground">{t('deliveryLocationLabel')}</p>
                 <p className="truncate text-sm font-medium text-foreground">
                   {deliveryInfo.location}
                 </p>
@@ -269,7 +246,7 @@ export function UnloadingStatus() {
                 <User className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted-foreground">Shipper</p>
+                <p className="text-xs text-muted-foreground">{t('shipperLabel')}</p>
                 <p className="truncate text-sm font-medium text-foreground">
                   {deliveryInfo.shipperName}
                 </p>
@@ -280,9 +257,9 @@ export function UnloadingStatus() {
                 <Box className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted-foreground">Quantity delivered</p>
+                <p className="text-xs text-muted-foreground">{t('quantityDelivered')}</p>
                 <p className="text-sm font-medium text-foreground">
-                  {deliveryInfo.quantity} items
+                  {deliveryInfo.quantity} {t('items')}
                 </p>
               </div>
             </div>
@@ -296,7 +273,7 @@ export function UnloadingStatus() {
                   <Zap className="h-3.5 w-3.5 text-primary" />
                 </div>
                 <span className="text-xs font-medium text-foreground">
-                  {language === "en" ? "Trust Score Progress" : "ट्रस्ट स्कोर प्रगति"}
+                  {t('trustScoreProgress')}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -307,7 +284,7 @@ export function UnloadingStatus() {
             <div className="mb-2 flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">87</span>
               <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                <div 
+                <div
                   className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all duration-500"
                   style={{ width: "70%" }}
                 />
@@ -319,9 +296,7 @@ export function UnloadingStatus() {
               <span className="text-xs font-medium text-muted-foreground">90</span>
             </div>
             <p className="text-[10px] leading-tight text-muted-foreground">
-              {language === "en" 
-                ? "On-time deliveries increase your trust score and unlock better jobs."
-                : "समय पर डिलीवरी आपके ट्रस्ट स्कोर को बढ़ाती है और बेहतर काम अनलॉक करती है।"}
+              {t('onTimeDeliveriesBoost')}
             </p>
           </div>
 
@@ -333,9 +308,7 @@ export function UnloadingStatus() {
                 className="h-14 w-full text-base font-bold rounded-xl"
                 size="lg"
               >
-                {state === "waiting" 
-                  ? (language === "en" ? "Start Unloading" : "अनलोडिंग शुरू करें")
-                  : (language === "en" ? "Complete Unloading" : "अनलोडिंग पूर्ण करें")}
+                {state === "waiting" ? t('startUnloading') : t('completeUnloading')}
               </Button>
             )}
 
@@ -346,14 +319,14 @@ export function UnloadingStatus() {
                 className="h-12 w-full text-sm font-medium"
               >
                 <Bell className="mr-2 h-4 w-4" />
-                {language === "en" ? "Notify shipper" : "शिपर को सूचित करें"}
+                {t('notifyShipper')}
               </Button>
             )}
 
             {state !== "completed" && shipperNotified && (
               <div className="flex h-10 items-center justify-center gap-2 rounded-lg bg-success/10 text-sm font-medium text-success">
                 <CheckCircle2 className="h-4 w-4" />
-                {language === "en" ? "Shipper notified" : "शिपर को सूचित किया गया"}
+                {t('shipperNotifiedConfirm')}
               </div>
             )}
 

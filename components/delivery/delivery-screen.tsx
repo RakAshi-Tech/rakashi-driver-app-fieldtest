@@ -8,6 +8,8 @@ import { DirectionArrow } from "./direction-arrow"
 import { LocalInstructions } from "./local-instructions"
 import { ConfidenceBar } from "./confidence-bar"
 import { ConfirmArrival } from "./confirm-arrival"
+import { useLang } from "@/app/context/LanguageContext"
+import { LangToggle } from "@/app/components/LangToggle"
 
 interface DeliveryInfoProps {
   shipperName?: string
@@ -27,8 +29,8 @@ export function DeliveryScreen({
   fee = defaultDeliveryInfo.fee,
 }: DeliveryInfoProps = {}) {
   const router = useRouter()
+  const { t } = useLang()
   const [showArrived, setShowArrived] = useState(false)
-  const [language, setLanguage] = useState<"en" | "hi">("en")
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null)
 
   useEffect(() => {
@@ -46,28 +48,7 @@ export function DeliveryScreen({
     <main className="relative mx-auto flex h-dvh max-w-md flex-col bg-background">
       {/* Language toggle */}
       <div className="flex justify-end px-4 pt-2">
-        <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5">
-          <button
-            onClick={() => setLanguage("en")}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-              language === "en"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            EN
-          </button>
-          <button
-            onClick={() => setLanguage("hi")}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-              language === "hi"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            हिंदी
-          </button>
-        </div>
+        <LangToggle />
       </div>
 
       {/* Scrollable content */}
@@ -92,7 +73,6 @@ export function DeliveryScreen({
         <EntrancePhoto
           latitude={currentLocation?.lat}
           longitude={currentLocation?.lng}
-          language={language}
         />
 
         {/* 2. AR-like Direction Arrow */}
@@ -102,7 +82,7 @@ export function DeliveryScreen({
         <div className="mx-4 h-px bg-border" />
 
         {/* 3. Hyper-local Instructions */}
-        <LocalInstructions language={language} />
+        <LocalInstructions />
 
         {/* 4+5. Confidence Bar with Arrival Badge */}
         <ConfidenceBar />
@@ -119,7 +99,7 @@ export function DeliveryScreen({
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-green-500">
           <div className="text-6xl mb-4">📍</div>
           <div className="text-3xl font-bold text-white tracking-wide">
-            Destination Arrived!
+            {t('destinationArrived')}
           </div>
         </div>
       )}

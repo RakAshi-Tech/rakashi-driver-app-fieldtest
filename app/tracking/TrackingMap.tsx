@@ -33,31 +33,45 @@ const orangeIcon = new L.DivIcon({
   className: "",
 })
 
-// Auto-follow current location
-function MapCenterUpdater({ center }: { center: [number, number] }) {
-  const map = useMap()
-  useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: true })
-  }, [center, map])
-  return null
-}
-
-// Force-center on button click (trigger increments)
-function ForceCenterUpdater({
+/**
+ * SmartCenterUpdater:
+ * - Auto-follows GPS position UNLESS the user is dragging the map
+ * - When forceCenterTrigger increments (Live Position button), resumes auto-follow immediately
+ */
+function SmartCenterUpdater({
   center,
-  trigger,
+  forceCenterTrigger,
 }: {
   center: [number, number]
-  trigger: number
+  forceCenterTrigger: number
 }) {
   const map = useMap()
-  const prevRef = useRef(trigger)
+  const userInteractingRef = useRef(false)
+  const prevTriggerRef = useRef(forceCenterTrigger)
+
+  // Listen for drag to pause auto-follow
   useEffect(() => {
-    if (trigger !== prevRef.current) {
-      prevRef.current = trigger
+    const onDragStart = () => { userInteractingRef.current = true }
+    map.on("dragstart", onDragStart)
+    return () => { map.off("dragstart", onDragStart) }
+  }, [map])
+
+  // Force-center on Live Position button (resets user-interacting flag)
+  useEffect(() => {
+    if (forceCenterTrigger !== prevTriggerRef.current) {
+      prevTriggerRef.current = forceCenterTrigger
+      userInteractingRef.current = false
       map.setView(center, map.getZoom(), { animate: true })
     }
-  }, [trigger, center, map])
+  }, [forceCenterTrigger, center, map])
+
+  // Auto-follow GPS — only when not user-interacting
+  useEffect(() => {
+    if (!userInteractingRef.current) {
+      map.setView(center, map.getZoom(), { animate: true })
+    }
+  }, [center, map])
+
   return null
 }
 
@@ -84,8 +98,16 @@ export default function TrackingMap({
     <MapContainer
       center={center}
       zoom={15}
-      style={{ width: "100%", height: "100%" }}
+      style={{
+        width: "100%",
+        height: "100%",
+        touchAction: "pan-x pan-y pinch-zoom",
+      }}
       zoomControl
+      dragging
+      scrollWheelZoom
+      doubleClickZoom
+      touchZoom
     >
       {mapType === "street" ? (
         <TileLayer
@@ -101,12 +123,12 @@ export default function TrackingMap({
         />
       )}
 
-      {/* Auto-follow current location */}
-      {currentLocation && <MapCenterUpdater center={currentLocation} />}
-
-      {/* Force-center on Live Position button click */}
+      {/* Smart center: auto-follow GPS, pause on drag, resume on Live Position */}
       {currentLocation && (
-        <ForceCenterUpdater center={currentLocation} trigger={forceCenterTrigger} />
+        <SmartCenterUpdater
+          center={currentLocation}
+          forceCenterTrigger={forceCenterTrigger}
+        />
       )}
 
       {/* Current location — blue, with popup */}

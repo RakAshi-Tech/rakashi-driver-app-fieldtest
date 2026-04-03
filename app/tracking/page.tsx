@@ -384,7 +384,7 @@ export default function TrackingPage() {
       </div>
 
       {/* ── Map ───────────────────────────────────────────────────────────── */}
-      <div style={{ position: "relative", height: "45vh", flexShrink: 0 }}>
+      <div style={{ position: "relative", height: "45vh", flexShrink: 0, touchAction: "pan-x pan-y pinch-zoom", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         <TrackingMap
           currentLocation={currentLocation}
           destination={destTuple}

@@ -1,14 +1,16 @@
 "use client"
 
 import { ShieldCheck, Award } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 export function ConfidenceBar() {
+  const { t } = useLang()
   const confidence = "high" as "high" | "medium" | "low"
   const successCount = 42
 
   const config = {
     high: {
-      label: "High Reliability",
+      label: t('highReliability'),
       barColor: "bg-success",
       textColor: "text-success",
       bgColor: "bg-success/15",
@@ -43,7 +45,7 @@ export function ConfidenceBar() {
           <div className="flex items-center gap-2">
             <ShieldCheck className={`h-4 w-4 ${c.textColor}`} />
             <span className={`text-xs font-black uppercase tracking-wider ${c.textColor}`}>
-              Route Confidence
+              {t('routeConfidence')}
             </span>
           </div>
           <span className={`text-xs font-black ${c.textColor}`}>{c.label}</span>
@@ -61,8 +63,8 @@ export function ConfidenceBar() {
         <div className="flex items-center gap-2">
           <Award className={`h-4 w-4 ${c.textColor}`} />
           <span className={`text-xs font-bold ${c.textColor}`}>
-            Arrived Successfully{" "}
-            <span className="text-sm font-black">{successCount}</span> times
+            {t('arrivedSuccessfully')}{" "}
+            <span className="text-sm font-black">{successCount}</span> {t('times')}
           </span>
         </div>
       </div>

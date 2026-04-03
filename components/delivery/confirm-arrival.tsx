@@ -2,12 +2,14 @@
 
 import { useState } from "react"
 import { CheckCircle2, Phone } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 interface ConfirmArrivalProps {
   onConfirm?: () => void
 }
 
 export function ConfirmArrival({ onConfirm }: ConfirmArrivalProps) {
+  const { t } = useLang()
   const [confirmed, setConfirmed] = useState(false)
 
   const handleConfirm = () => {
@@ -29,7 +31,7 @@ export function ConfirmArrival({ onConfirm }: ConfirmArrivalProps) {
         aria-label="Call receiver"
       >
         <Phone className="h-4 w-4" />
-        <span className="text-sm">Call Receiver</span>
+        <span className="text-sm">{t('callReceiver')}</span>
       </button>
 
       {/* Confirm button */}
@@ -45,7 +47,7 @@ export function ConfirmArrival({ onConfirm }: ConfirmArrivalProps) {
       >
         <CheckCircle2 className={`h-5 w-5 ${confirmed ? "" : "animate-pulse"}`} />
         <span className="text-base">
-          {confirmed ? "CONFIRMED" : "CONFIRM ARRIVAL"}
+          {confirmed ? t('confirmedArrival') : t('confirmArrival')}
         </span>
       </button>
     </section>

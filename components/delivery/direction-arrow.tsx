@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useLang } from "@/app/context/LanguageContext"
 
 export function DirectionArrow() {
+  const { t } = useLang()
   const [pulse, setPulse] = useState(false)
 
   useEffect(() => {
@@ -50,12 +52,12 @@ export function DirectionArrow() {
       {/* Distance callout */}
       <div className="flex items-baseline gap-1.5">
         <span className="text-2xl font-black text-primary">12</span>
-        <span className="text-sm font-bold text-primary/70">m ahead</span>
+        <span className="text-sm font-bold text-primary/70">{t('mAhead')}</span>
       </div>
 
       {/* Door-level label */}
       <span className="rounded-lg bg-primary/15 px-3 py-0.5 text-xs font-black uppercase tracking-widest text-primary">
-        Door-level precision
+        {t('doorLevelPrecision')}
       </span>
     </section>
   )

@@ -1,6 +1,7 @@
 "use client"
 
 import { TrendingUp, Info } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 interface TrustScoreCardProps {
   score: number
@@ -8,6 +9,8 @@ interface TrustScoreCardProps {
 }
 
 export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
+  const { t } = useLang()
+
   const getTrendIcon = () => {
     switch (trend) {
       case "up":
@@ -36,14 +39,14 @@ export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Trust Score
+            {t('trustScore')}
           </span>
           <Info className="h-3 w-3 text-muted-foreground/60" />
         </div>
         <div className="flex items-center gap-1">
           {getTrendIcon()}
           <span className="text-[10px] text-muted-foreground">
-            {trend === "up" ? "improving" : trend === "stable" ? "stable" : "declining"}
+            {trend === "up" ? t('improving') : trend === "stable" ? t('stable') : t('declining')}
           </span>
         </div>
       </div>
@@ -61,13 +64,13 @@ export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
       </div>
 
       <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
-        Based on completed deliveries, on-time rate & dispute history
+        {t('trustScoreDesc')}
       </p>
 
       <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border">
         <div className="h-1.5 w-1.5 rounded-full bg-primary" />
         <span className="text-[10px] text-foreground">
-          Higher score = more priority jobs & faster payouts
+          {t('trustScoreBenefit')}
         </span>
       </div>
     </div>

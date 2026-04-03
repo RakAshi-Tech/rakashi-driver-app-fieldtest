@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Navigation } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 const DESTINATION = { lat: 35.6595, lng: 139.7004 }
 
@@ -16,11 +17,8 @@ interface RouteStep {
   totalDuration: string
 }
 
-interface LocalInstructionsProps {
-  language?: "en" | "hi"
-}
-
-export function LocalInstructions({ language = "en" }: LocalInstructionsProps) {
+export function LocalInstructions() {
+  const { lang: language, t } = useLang()
   const [step, setStep] = useState<RouteStep | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -88,22 +86,19 @@ export function LocalInstructions({ language = "en" }: LocalInstructionsProps) {
     }
   }, [language])
 
-  const loadingText = language === "hi" ? "मार्ग प्राप्त हो रहा है..." : "ルートを取得中..."
-  const errorText = language === "hi" ? "मार्ग प्राप्त नहीं हो सका" : "ルートを取得できませんでした"
-
   return (
     <section className="px-4 py-1" aria-label="Navigation instructions">
       <h2 className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-        {language === "hi" ? "अगला कदम" : "Next Step"}
+        {t('nextStep')}
       </h2>
 
       {loading ? (
         <div className="rounded-lg bg-secondary/50 p-4 text-sm text-muted-foreground animate-pulse">
-          {loadingText}
+          {t('routeLoading')}
         </div>
       ) : error ? (
         <div className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">
-          {errorText}
+          {t('routeError')}
         </div>
       ) : step ? (
         <div

@@ -3,6 +3,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Star, Clock, CheckCircle, TrendingUp } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
 
 interface DriverProfileCardProps {
   name: string
@@ -31,6 +32,8 @@ export function DriverProfileCard({
   deliveryTimes,
   isAccepting,
 }: DriverProfileCardProps) {
+  const { t } = useLang()
+
   const initials = name
     .split(" ")
     .map((n) => n[0])
@@ -56,7 +59,7 @@ export function DriverProfileCard({
                 isAccepting ? "bg-primary text-primary-foreground" : ""
               }`}
             >
-              {isAccepting ? "Accepting" : "Offline"}
+              {isAccepting ? t('accepting') : t('offline')}
             </Badge>
           </div>
 
@@ -83,26 +86,26 @@ export function DriverProfileCard({
       <div className="grid grid-cols-4 gap-2 mt-3">
         <div className="text-center">
           <div className="text-sm font-bold text-foreground">{totalDeliveries.toLocaleString()}</div>
-          <div className="text-[10px] text-muted-foreground">Deliveries</div>
+          <div className="text-[10px] text-muted-foreground">{t('deliveries')}</div>
         </div>
         <div className="text-center">
           <div className="text-sm font-bold text-foreground">{yearsExperience}y</div>
-          <div className="text-[10px] text-muted-foreground">Experience</div>
+          <div className="text-[10px] text-muted-foreground">{t('experience')}</div>
         </div>
         <div className="text-center">
           <div className="text-sm font-bold text-primary">{onTimeRate}%</div>
-          <div className="text-[10px] text-muted-foreground">On-time</div>
+          <div className="text-[10px] text-muted-foreground">{t('onTime')}</div>
         </div>
         <div className="text-center">
           <div className="text-sm font-bold text-foreground">{responseRate}%</div>
-          <div className="text-[10px] text-muted-foreground">Response</div>
+          <div className="text-[10px] text-muted-foreground">{t('responseRateLabel')}</div>
         </div>
       </div>
 
       <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-border">
         <div className="flex items-center gap-1 text-muted-foreground">
           <Clock className="h-3 w-3" />
-          <span className="text-[10px]">Avg delivery:</span>
+          <span className="text-[10px]">{t('avgDelivery')}</span>
         </div>
         <div className="flex gap-2 text-[10px]">
           <span className="text-foreground">

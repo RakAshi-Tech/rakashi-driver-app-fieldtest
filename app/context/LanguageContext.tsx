@@ -91,6 +91,85 @@ const translations: Record<Lang, Record<string, string>> = {
     // === completion ===
     backToDashboard: 'डैशबोर्ड पर वापस जाएं',
 
+    // === driver-profile-card ===
+    accepting: 'स्वीकार कर रहे हैं',
+    offline: 'ऑफलाइन',
+    deliveries: 'डिलीवरी',
+    experience: 'अनुभव',
+    onTime: 'समय पर',
+    responseRateLabel: 'प्रतिक्रिया',
+    avgDelivery: 'औसत डिलीवरी:',
+
+    // === trust-score-card ===
+    trustScore: 'ट्रस्ट स्कोर',
+    improving: 'सुधार हो रहा है',
+    stable: 'स्थिर',
+    declining: 'घट रहा है',
+    trustScoreDesc: 'पूर्ण डिलीवरी, समय पर दर और विवाद इतिहास के आधार पर',
+    trustScoreBenefit: 'उच्च स्कोर = अधिक प्राथमिकता काम और तेज़ भुगतान',
+
+    // === today-jobs-list ===
+    todayJobs: 'आज के काम',
+    viewAll: 'सब देखें',
+    pending: 'लंबित',
+    inProgress: 'चल रहा है',
+    done: 'हो गया',
+    items: 'आइटम',
+    block: 'ब्लॉक',
+
+    // === completed-jobs-list ===
+    completedJobs: 'पूर्ण काम',
+
+    // === delivery-screen ===
+    destinationArrived: 'गंतव्य पर पहुंच गए!',
+
+    // === confirm-arrival ===
+    callReceiver: 'प्राप्तकर्ता को कॉल करें',
+    confirmArrival: 'आगमन की पुष्टि करें',
+    confirmedArrival: 'पुष्टि हो गई',
+
+    // === entrance-photo ===
+    matchEntrance: 'यह प्रवेश द्वार मिलाएं',
+    streetViewUnavailable: 'Street View उपलब्ध नहीं',
+
+    // === direction-arrow ===
+    mAhead: 'मीटर आगे',
+    doorLevelPrecision: 'दरवाज़े की सटीकता',
+
+    // === local-instructions ===
+    nextStep: 'अगला कदम',
+    routeLoading: 'मार्ग प्राप्त हो रहा है...',
+    routeError: 'मार्ग प्राप्त नहीं हो सका',
+
+    // === confidence-bar ===
+    routeConfidence: 'मार्ग विश्वसनीयता',
+    highReliability: 'उच्च विश्वसनीयता',
+    arrivedSuccessfully: 'सफलतापूर्वक पहुंचे',
+    times: 'बार',
+
+    // === unloading-status ===
+    arrivalConfirmed: 'आगमन की पुष्टि',
+    beginUnloading: 'सामान उतारना शुरू करें',
+    arrivalStep: 'आगमन',
+    unloadingStep: 'उतराई',
+    completedStep: 'पूर्ण',
+    readyToUnload: 'उतारने के लिए तैयार',
+    tapToStart: 'उतारना शुरू करने के लिए नीचे बटन दबाएं',
+    unloadingTime: 'उतराई का समय',
+    unloadingComplete: 'उतराई पूर्ण',
+    totalTime: 'कुल समय:',
+    shipperNotifiedMsg: 'शिपर को सूचित किया गया है',
+    deliveryLocationLabel: 'डिलीवरी स्थान',
+    shipperLabel: 'शिपर',
+    quantityDelivered: 'डिलीवर की गई मात्रा',
+    trustScoreProgress: 'ट्रस्ट स्कोर प्रगति',
+    onTimeDeliveriesBoost: 'समय पर डिलीवरी आपके ट्रस्ट स्कोर को बढ़ाती है और बेहतर काम अनलॉक करती है।',
+    startUnloading: 'अनलोडिंग शुरू करें',
+    completeUnloading: 'अनलोडिंग पूर्ण करें',
+    notifyShipper: 'शिपर को सूचित करें',
+    shipperNotifiedConfirm: 'शिपर को सूचित किया गया',
+    deliveryReportSent: 'शिपर को रिपोर्ट भेजी गई! शाबाश! 🎉',
+
     // === エラー・共通メッセージ ===
     loading: 'लोड हो रहा है...',
     error: 'त्रुटि',
@@ -181,6 +260,85 @@ const translations: Record<Lang, Record<string, string>> = {
     // === completion ===
     backToDashboard: 'Back to Dashboard',
 
+    // === driver-profile-card ===
+    accepting: 'Accepting',
+    offline: 'Offline',
+    deliveries: 'Deliveries',
+    experience: 'Experience',
+    onTime: 'On-time',
+    responseRateLabel: 'Response',
+    avgDelivery: 'Avg delivery:',
+
+    // === trust-score-card ===
+    trustScore: 'Trust Score',
+    improving: 'improving',
+    stable: 'stable',
+    declining: 'declining',
+    trustScoreDesc: 'Based on completed deliveries, on-time rate & dispute history',
+    trustScoreBenefit: 'Higher score = more priority jobs & faster payouts',
+
+    // === today-jobs-list ===
+    todayJobs: "Today's Jobs",
+    viewAll: 'View all',
+    pending: 'Pending',
+    inProgress: 'In Progress',
+    done: 'Done',
+    items: 'items',
+    block: 'Block',
+
+    // === completed-jobs-list ===
+    completedJobs: 'Completed Jobs',
+
+    // === delivery-screen ===
+    destinationArrived: 'Destination Arrived!',
+
+    // === confirm-arrival ===
+    callReceiver: 'Call Receiver',
+    confirmArrival: 'CONFIRM ARRIVAL',
+    confirmedArrival: 'CONFIRMED',
+
+    // === entrance-photo ===
+    matchEntrance: 'Match this entrance',
+    streetViewUnavailable: 'Street View unavailable',
+
+    // === direction-arrow ===
+    mAhead: 'm ahead',
+    doorLevelPrecision: 'Door-level precision',
+
+    // === local-instructions ===
+    nextStep: 'Next Step',
+    routeLoading: 'Getting route...',
+    routeError: 'Could not get route',
+
+    // === confidence-bar ===
+    routeConfidence: 'Route Confidence',
+    highReliability: 'High Reliability',
+    arrivedSuccessfully: 'Arrived Successfully',
+    times: 'times',
+
+    // === unloading-status ===
+    arrivalConfirmed: 'Arrival confirmed',
+    beginUnloading: 'Begin unloading the goods',
+    arrivalStep: 'Arrival',
+    unloadingStep: 'Unloading',
+    completedStep: 'Completed',
+    readyToUnload: 'Ready to Unload',
+    tapToStart: 'Tap the button below to start unloading',
+    unloadingTime: 'Unloading time',
+    unloadingComplete: 'Unloading Complete',
+    totalTime: 'Total time:',
+    shipperNotifiedMsg: 'Shipper has been notified',
+    deliveryLocationLabel: 'Delivery location',
+    shipperLabel: 'Shipper',
+    quantityDelivered: 'Quantity delivered',
+    trustScoreProgress: 'Trust Score Progress',
+    onTimeDeliveriesBoost: 'On-time deliveries increase your trust score and unlock better jobs.',
+    startUnloading: 'Start Unloading',
+    completeUnloading: 'Complete Unloading',
+    notifyShipper: 'Notify shipper',
+    shipperNotifiedConfirm: 'Shipper notified',
+    deliveryReportSent: 'Delivery report sent to shipper! Great work! 🎉',
+
     // === エラー・共通メッセージ ===
     loading: 'Loading...',
     error: 'Error',
@@ -203,7 +361,12 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const saved = localStorage.getItem('lang') as Lang
-    if (saved === 'hi' || saved === 'en') setLangState(saved)
+    if (saved === 'en') {
+      setLangState('en')
+    } else {
+      setLangState('hi')
+      localStorage.setItem('lang', 'hi')
+    }
   }, [])
 
   const setLang = (newLang: Lang) => {

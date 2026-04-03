@@ -1,17 +1,41 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { APIProvider, Map, Marker, MapMouseEvent, useMap } from "@vis.gl/react-google-maps"
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
-import { MapPin } from "lucide-react"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
+import type { SetDestinationMapProps } from "./SetDestinationMap"
 
-const DELHI_CENTER = { lat: 28.6139, lng: 77.209 }
+const DELHI_CENTER: [number, number] = [28.6139, 77.209]
 
-function decodePolyline(encoded: string) {
-  const points: { lat: number; lng: number }[] = []
+// Leaflet must not run on the server
+const SetDestinationMap = dynamic<SetDestinationMapProps>(
+  () => import("./SetDestinationMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#1e293b",
+          color: "#9ca3af",
+          fontSize: "13px",
+        }}
+      >
+        Loading map…
+      </div>
+    ),
+  }
+)
+
+function decodePolyline(encoded: string): [number, number][] {
+  const points: [number, number][] = []
   let index = 0, lat = 0, lng = 0
   while (index < encoded.length) {
     let shift = 0, result = 0, b
@@ -28,28 +52,9 @@ function decodePolyline(encoded: string) {
       shift += 5
     } while (b >= 0x20)
     lng += (result & 1) ? ~(result >> 1) : result >> 1
-    points.push({ lat: lat / 1e5, lng: lng / 1e5 })
+    points.push([lat / 1e5, lng / 1e5])
   }
   return points
-}
-
-function RoutePolyline({ points }: { points: { lat: number; lng: number }[] }) {
-  const map = useMap()
-  const polylineRef = useRef<google.maps.Polyline | null>(null)
-
-  useEffect(() => {
-    if (!map || points.length === 0) return
-    if (polylineRef.current) polylineRef.current.setMap(null)
-    polylineRef.current = new google.maps.Polyline({
-      path: points,
-      strokeColor: "#F97316",
-      strokeWeight: 4,
-      map,
-    })
-    return () => { polylineRef.current?.setMap(null) }
-  }, [map, points])
-
-  return null
 }
 
 interface RouteInfo {
@@ -57,17 +62,15 @@ interface RouteInfo {
   durationText: string
   distanceValue: number
   durationValue: number
-  polylinePoints: { lat: number; lng: number }[]
+  polylinePoints: [number, number][]
 }
 
 export default function SetDestinationPage() {
   const router = useRouter()
   const { t } = useLang()
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""
 
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [mapCenter, setMapCenter] = useState(DELHI_CENTER)
-  const [selected, setSelected] = useState<{ lat: number; lng: number } | null>(null)
+  const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null)
+  const [selected, setSelected] = useState<[number, number] | null>(null)
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null)
   const [loadingRoute, setLoadingRoute] = useState(false)
 
@@ -75,21 +78,19 @@ export default function SetDestinationPage() {
     if (!navigator.geolocation) return
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        setCurrentLocation(loc)
-        setMapCenter(loc)
+        setCurrentLocation([pos.coords.latitude, pos.coords.longitude])
       },
       () => { /* fallback to Delhi */ },
       { timeout: 8000, enableHighAccuracy: true }
     )
   }, [])
 
-  const fetchRoute = async (dest: { lat: number; lng: number }) => {
+  const fetchRoute = async (dest: [number, number]) => {
     if (!currentLocation) return
     setLoadingRoute(true)
     try {
-      const origin = `${currentLocation.lat},${currentLocation.lng}`
-      const destination = `${dest.lat},${dest.lng}`
+      const origin = `${currentLocation[0]},${currentLocation[1]}`
+      const destination = `${dest[0]},${dest[1]}`
       const res = await fetch(
         `/api/directions?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&mode=walking`
       )
@@ -112,9 +113,8 @@ export default function SetDestinationPage() {
     }
   }
 
-  const handleMapClick = (e: MapMouseEvent) => {
-    if (!e.detail.latLng) return
-    const dest = { lat: e.detail.latLng.lat, lng: e.detail.latLng.lng }
+  const handleMapClick = (lat: number, lng: number) => {
+    const dest: [number, number] = [lat, lng]
     setSelected(dest)
     setRouteInfo(null)
     fetchRoute(dest)
@@ -123,14 +123,13 @@ export default function SetDestinationPage() {
   const handleSetDestination = () => {
     if (!selected) return
     if (routeInfo) {
-      const coordinates = routeInfo.polylinePoints.map(p => [p.lat, p.lng])
-      localStorage.setItem("route", JSON.stringify({ coordinates }))
+      localStorage.setItem("route", JSON.stringify({ coordinates: routeInfo.polylinePoints }))
     }
     localStorage.setItem(
       "destination",
       JSON.stringify({
-        lat: selected.lat,
-        lng: selected.lng,
+        lat: selected[0],
+        lng: selected[1],
         distance: routeInfo?.distanceValue ?? 0,
         duration: routeInfo?.durationValue ?? 0,
       })
@@ -143,80 +142,47 @@ export default function SetDestinationPage() {
       {/* Header */}
       <div className="px-4 py-3 bg-card border-b border-border shrink-0 flex items-center justify-between">
         <p className="text-sm font-medium text-muted-foreground">
-          {t('tapMapInstruction')}
+          {t("tapMapInstruction")}
         </p>
         <LangToggle />
       </div>
 
       {/* Map */}
-      <div className="relative" style={{ height: "calc(100vh - 200px)" }}>
-        {apiKey ? (
-          <APIProvider apiKey={apiKey}>
-            <Map
-              center={mapCenter}
-              defaultZoom={15}
-              onClick={handleMapClick}
-              style={{ width: "100%", height: "100%", minHeight: "400px" }}
-              gestureHandling="greedy"
-              disableDefaultUI={false}
-            >
-              {currentLocation && (
-                <Marker
-                  position={currentLocation}
-                  title={t('currentLocation')}
-                  icon={{
-                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
-                    fillColor: "#4285F4",
-                    fillOpacity: 1,
-                    strokeColor: "#fff",
-                    strokeWeight: 1,
-                    scale: 1.8,
-                    anchor: { x: 12, y: 22 } as any,
-                  }}
-                />
-              )}
-              {selected && (
-                <Marker
-                  position={selected}
-                  title={t('setDestination')}
-                  icon={{
-                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
-                    fillColor: "#F97316",
-                    fillOpacity: 1,
-                    strokeColor: "#fff",
-                    strokeWeight: 1,
-                    scale: 1.8,
-                    anchor: { x: 12, y: 22 } as any,
-                  }}
-                />
-              )}
-              {routeInfo && routeInfo.polylinePoints.length > 0 && (
-                <RoutePolyline points={routeInfo.polylinePoints} />
-              )}
-            </Map>
-          </APIProvider>
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-secondary">
-            Google Maps API key not configured
-          </div>
-        )}
+      <div
+        style={{
+          position: "relative",
+          height: "calc(100vh - 200px)",
+          width: "100%",
+          touchAction: "pan-x pan-y pinch-zoom",
+          WebkitOverflowScrolling: "touch",
+          pointerEvents: "auto",
+          zIndex: 0,
+        } as React.CSSProperties}
+      >
+        <SetDestinationMap
+          initialCenter={currentLocation ?? DELHI_CENTER}
+          currentLocation={currentLocation}
+          selected={selected}
+          routePoints={routeInfo?.polylinePoints ?? []}
+          onMapClick={handleMapClick}
+        />
       </div>
 
       {/* Bottom panel */}
       <div className="p-4 bg-card border-t border-border shrink-0 space-y-3">
         {!selected ? (
           <p className="text-sm text-muted-foreground text-center">
-            {t('tapMapInstruction')}
+            {t("tapMapInstruction")}
           </p>
         ) : (
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">📍 {t('destinationSet')}</p>
+            <p className="text-sm font-semibold text-foreground">📍 {t("destinationSet")}</p>
             {loadingRoute ? (
-              <p className="text-sm text-muted-foreground">{t('calculating')}</p>
+              <p className="text-sm text-muted-foreground">{t("calculating")}</p>
             ) : routeInfo ? (
               <>
-                <p className="text-sm text-foreground">📏 {t('distance')}: {routeInfo.distanceText}</p>
-                <p className="text-sm text-foreground">⏱️ {t('walkingTime')}: {routeInfo.durationText}</p>
+                <p className="text-sm text-foreground">📏 {t("distance")}: {routeInfo.distanceText}</p>
+                <p className="text-sm text-foreground">⏱️ {t("walkingTime")}: {routeInfo.durationText}</p>
               </>
             ) : null}
           </div>
@@ -228,7 +194,7 @@ export default function SetDestinationPage() {
           className="w-full h-14 text-base font-bold rounded-xl text-white"
           style={{ backgroundColor: selected && !loadingRoute ? "#F97316" : undefined }}
         >
-          {t('setAsDestination')}
+          {t("setAsDestination")}
         </Button>
 
         <Button
@@ -236,7 +202,7 @@ export default function SetDestinationPage() {
           variant="outline"
           className="w-full h-12 text-base font-semibold rounded-xl"
         >
-          {t('cancel')}
+          {t("cancel")}
         </Button>
       </div>
     </div>
