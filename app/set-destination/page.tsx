@@ -31,33 +31,30 @@ function decodePolyline(encoded: string) {
   return points
 }
 
-// Polyline renderer — must be inside APIProvider
 function RoutePolyline({ points }: { points: { lat: number; lng: number }[] }) {
   const map = useMap()
   const polylineRef = useRef<google.maps.Polyline | null>(null)
 
   useEffect(() => {
     if (!map || points.length === 0) return
-    if (polylineRef.current) {
-      polylineRef.current.setMap(null)
-    }
+    if (polylineRef.current) polylineRef.current.setMap(null)
     polylineRef.current = new google.maps.Polyline({
       path: points,
       strokeColor: "#F97316",
       strokeWeight: 4,
       map,
     })
-    return () => {
-      polylineRef.current?.setMap(null)
-    }
+    return () => { polylineRef.current?.setMap(null) }
   }, [map, points])
 
   return null
 }
 
 interface RouteInfo {
-  distance: string
-  duration: string
+  distanceText: string
+  durationText: string
+  distanceValue: number   // meters
+  durationValue: number   // seconds
   polylinePoints: { lat: number; lng: number }[]
 }
 
@@ -71,7 +68,6 @@ export default function SetDestinationPage() {
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null)
   const [loadingRoute, setLoadingRoute] = useState(false)
 
-  // Get GPS on mount
   useEffect(() => {
     if (!navigator.geolocation) return
     navigator.geolocation.getCurrentPosition(
@@ -80,9 +76,7 @@ export default function SetDestinationPage() {
         setCurrentLocation(loc)
         setMapCenter(loc)
       },
-      () => {
-        // fallback to Delhi
-      },
+      () => { /* fallback to Delhi */ },
       { timeout: 8000, enableHighAccuracy: true }
     )
   }, [])
@@ -101,8 +95,10 @@ export default function SetDestinationPage() {
         const leg = data.routes[0].legs[0]
         const polylinePoints = decodePolyline(data.routes[0].overview_polyline.points)
         setRouteInfo({
-          distance: leg.distance.text,
-          duration: leg.duration.text,
+          distanceText: leg.distance.text,
+          durationText: leg.duration.text,
+          distanceValue: leg.distance.value,   // meters (number)
+          durationValue: leg.duration.value,   // seconds (number)
           polylinePoints,
         })
       }
@@ -123,13 +119,18 @@ export default function SetDestinationPage() {
 
   const handleSetDestination = () => {
     if (!selected) return
+    // Save route coordinates as [[lat, lng], ...] for Leaflet
+    if (routeInfo) {
+      const coordinates = routeInfo.polylinePoints.map(p => [p.lat, p.lng])
+      localStorage.setItem("route", JSON.stringify({ coordinates }))
+    }
     localStorage.setItem(
       "destination",
       JSON.stringify({
         lat: selected.lat,
         lng: selected.lng,
-        distance: routeInfo?.distance ?? "",
-        duration: routeInfo?.duration ?? "",
+        distance: routeInfo?.distanceValue ?? 0,   // meters
+        duration: routeInfo?.durationValue ?? 0,   // seconds
       })
     )
     router.push("/tracking")
@@ -156,7 +157,6 @@ export default function SetDestinationPage() {
               gestureHandling="greedy"
               disableDefaultUI={false}
             >
-              {/* Current location marker — blue */}
               {currentLocation && (
                 <Marker
                   position={currentLocation}
@@ -172,8 +172,6 @@ export default function SetDestinationPage() {
                   }}
                 />
               )}
-
-              {/* Destination marker — orange */}
               {selected && (
                 <Marker
                   position={selected}
@@ -189,8 +187,6 @@ export default function SetDestinationPage() {
                   }}
                 />
               )}
-
-              {/* Route polyline */}
               {routeInfo && routeInfo.polylinePoints.length > 0 && (
                 <RoutePolyline points={routeInfo.polylinePoints} />
               )}
@@ -211,21 +207,18 @@ export default function SetDestinationPage() {
           </p>
         ) : (
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">
-              📍 Destination set
-            </p>
+            <p className="text-sm font-semibold text-foreground">📍 Destination set</p>
             {loadingRoute ? (
               <p className="text-sm text-muted-foreground">Calculating route…</p>
             ) : routeInfo ? (
               <>
-                <p className="text-sm text-foreground">📏 Distance: {routeInfo.distance}</p>
-                <p className="text-sm text-foreground">⏱️ Walking time: {routeInfo.duration}</p>
+                <p className="text-sm text-foreground">📏 Distance: {routeInfo.distanceText}</p>
+                <p className="text-sm text-foreground">⏱️ Walking time: {routeInfo.durationText}</p>
               </>
             ) : null}
           </div>
         )}
 
-        {/* Set as Destination */}
         <Button
           onClick={handleSetDestination}
           disabled={!selected || loadingRoute}
@@ -235,7 +228,6 @@ export default function SetDestinationPage() {
           Set as Destination
         </Button>
 
-        {/* Cancel */}
         <Button
           onClick={() => router.push("/dashboard")}
           variant="outline"
