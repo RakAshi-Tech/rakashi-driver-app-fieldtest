@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { APIProvider, Map, Marker, MapMouseEvent } from "@vis.gl/react-google-maps"
 import { Button } from "@/components/ui/button"
@@ -13,21 +13,6 @@ export default function SetDestinationPage() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""
 
   const [selected, setSelected] = useState<{ lat: number; lng: number } | null>(null)
-  const [initialCenter, setInitialCenter] = useState(DELHI_CENTER)
-
-  // Get current GPS position for initial map center
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setInitialCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-      },
-      () => {
-        // fallback to Delhi
-      },
-      { timeout: 5000 }
-    )
-  }, [])
 
   const handleMapClick = (e: MapMouseEvent) => {
     if (!e.detail.latLng) return
@@ -50,14 +35,14 @@ export default function SetDestinationPage() {
       </div>
 
       {/* Map */}
-      <div className="flex-1 relative">
+      <div className="relative" style={{ height: 'calc(100vh - 180px)' }}>
         {apiKey ? (
           <APIProvider apiKey={apiKey}>
             <Map
-              defaultCenter={initialCenter}
+              defaultCenter={DELHI_CENTER}
               defaultZoom={15}
               onClick={handleMapClick}
-              style={{ width: "100%", height: "100%" }}
+              style={{ width: "100%", height: "100%", minHeight: "400px" }}
               gestureHandling="greedy"
               disableDefaultUI={false}
             >
