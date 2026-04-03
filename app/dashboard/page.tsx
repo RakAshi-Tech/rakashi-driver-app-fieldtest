@@ -12,74 +12,58 @@ import { supabase } from "@/lib/supabase"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
 
-const mockDriverData = {
-  name: "Rajaram Kumar",
-  totalDeliveries: 17280,
-  yearsExperience: 20,
-  onTimeRate: 98,
-  responseRate: 97,
-  rating: 4.6,
-  deliveryTimes: {
-    under5km: 27,
-    from5to10km: 50,
-    over10km: "TBD",
-  },
-  isAccepting: true,
-}
-
-const mockJobs: Job[] = [
-  {
-    id: "job-001",
-    shipperName: "Flipkart Logistics",
-    blockNumber: "A-127",
-    quantity: 12,
-    fee: 450,
-    status: "pending",
-  },
-  {
-    id: "job-002",
-    shipperName: "Amazon Fresh",
-    blockNumber: "B-045",
-    quantity: 8,
-    fee: 320,
-    status: "in_progress",
-  },
-  {
-    id: "job-003",
-    shipperName: "BigBasket",
-    blockNumber: "C-089",
-    quantity: 15,
-    fee: 580,
-    status: "done",
-  },
-]
-
 export default function HomePage() {
   const router = useRouter()
   const { t } = useLang()
   const [driverProfile, setDriverProfile] = useState<any>(null)
+  const [todayJobs, setTodayJobs] = useState<Job[]>([])
 
   useEffect(() => {
-    const loadProfile = async () => {
+    const loadData = async () => {
       const phone = localStorage.getItem("rakashi_phone")
       if (!phone) return
 
-      const { data } = await supabase
+      const { data: profile } = await supabase
         .from("driver_profiles")
         .select("*")
         .eq("phone_number", phone)
         .single()
 
-      if (data) {
-        setDriverProfile(data)
+      if (!profile) return
+      setDriverProfile(profile)
+
+      // Store driverId for tracking page
+      if (profile.id) localStorage.setItem("driverId", profile.id)
+
+      // Fetch today's deliveries
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+
+      const { data: deliveries } = await supabase
+        .from("gps_delivery_summary")
+        .select("id, job_id, started_at, completed_at")
+        .eq("driver_id", profile.id)
+        .gte("started_at", todayStart.toISOString())
+        .order("started_at", { ascending: false })
+
+      if (deliveries) {
+        const jobs: Job[] = deliveries.map((d, i) => ({
+          id: d.id,
+          shipperName: d.job_id || `Delivery #${i + 1}`,
+          blockNumber: "–",
+          quantity: 0,
+          fee: 0,
+          status: d.completed_at ? "done" : "in_progress",
+        }))
+        setTodayJobs(jobs)
       }
     }
-    loadProfile()
+    loadData()
   }, [])
 
-  const activeJobs = mockJobs.filter((job) => job.status !== "done")
-  const completedJobs = mockJobs.filter((job) => job.status === "done")
-  const firstPendingJob = mockJobs.find((job) => job.status === "pending")
+  const activeJobs  = todayJobs.filter((job) => job.status !== "done")
+  const completedJobs = todayJobs.filter((job) => job.status === "done")
+  const firstPendingJob = todayJobs.find((job) => job.status === "pending")
 
   const handleStartNextJob = () => {
     router.push("/ocr")
@@ -99,10 +83,16 @@ export default function HomePage() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col p-3 gap-3 overflow-hidden">
           <DriverProfileCard
-            {...mockDriverData}
-            name={driverProfile?.name ?? mockDriverData.name}
+            name={driverProfile?.name ?? "–"}
+            totalDeliveries={driverProfile?.total_deliveries ?? 0}
+            yearsExperience={driverProfile?.experience_years ?? 0}
+            onTimeRate={98}
+            responseRate={97}
+            rating={4.6}
+            deliveryTimes={{ under5km: 27, from5to10km: 50, over10km: "TBD" }}
+            isAccepting={true}
           />
-          <TrustScoreCard score={driverProfile?.trust_score ?? 87} trend="up" />
+          <TrustScoreCard score={driverProfile?.trust_score ?? 10} trend="up" />
           <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
             <TodayJobsList jobs={activeJobs} />
             <CompletedJobsList jobs={completedJobs} />

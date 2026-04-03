@@ -89,7 +89,7 @@ export function DriverProfileCard({
           <div className="text-[10px] text-muted-foreground">{t('deliveries')}</div>
         </div>
         <div className="text-center">
-          <div className="text-sm font-bold text-foreground">{yearsExperience}y</div>
+          <div className="text-sm font-bold text-foreground">{yearsExperience > 0 ? `${yearsExperience}y` : '< 1y'}</div>
           <div className="text-[10px] text-muted-foreground">{t('experience')}</div>
         </div>
         <div className="text-center">

@@ -50,6 +50,7 @@ export default function LoginPage() {
   const [name, setName] = useState("")
   const [vehicleType, setVehicleType] = useState<VehicleType>("E-Rickshaw")
   const [vehicleCode, setVehicleCode] = useState("")
+  const [experienceYears, setExperienceYears] = useState<number>(0)
   const [scanning, setScanning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [nameError, setNameError] = useState("")
@@ -59,6 +60,23 @@ export default function LoginPage() {
   useEffect(() => {
     localStorage.removeItem('loggedIn')
     document.cookie = 'rakashi-auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
+  }, [])
+
+  // Auto-login: if already have phone+profile, skip to dashboard
+  useEffect(() => {
+    const savedPhone = localStorage.getItem("rakashi_phone")
+    if (!savedPhone) return
+    supabase
+      .from("driver_profiles")
+      .select("id, name")
+      .eq("phone_number", savedPhone)
+      .single()
+      .then(({ data }) => {
+        if (data?.name) {
+          document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
+          router.push("/dashboard")
+        }
+      })
   }, [])
 
   // Resend timer
@@ -132,12 +150,14 @@ export default function LoginPage() {
           // 既存ユーザー → ダッシュボードへ
           router.push("/dashboard")
         } else {
-          // 新規ユーザー → onboardingへ
-          router.push(`/onboarding?phone=${phone}`)
+          // 新規ユーザー → プロフィール登録へ
+          setVerifying(false)
+          setScreen("profile")
         }
       } catch {
-        // プロフィールがない場合はonboardingへ
-        router.push(`/onboarding?phone=${phone}`)
+        // プロフィールがない場合はプロフィール登録へ
+        setVerifying(false)
+        setScreen("profile")
       }
       return
     }
@@ -185,15 +205,22 @@ export default function LoginPage() {
     }
     setSaving(true)
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase.from("driver_profiles").upsert({
-        id: user.id,
-        phone_number: `+91${phone}`,
-        name: name.trim(),
-        vehicle_type: vehicleType,
-      })
+    const phoneNumber = `+91${phone}`
+    const { data: upserted } = await supabase.from("driver_profiles").upsert({
+      phone_number: phoneNumber,
+      name: name.trim(),
+      vehicle_type: vehicleType,
+      experience_years: experienceYears,
+      trust_score: 10,
+      total_deliveries: 0,
+      total_earnings_inr: 0,
+    }, { onConflict: "phone_number" }).select("id").single()
+
+    if (upserted?.id) {
+      localStorage.setItem("driverId", upserted.id)
     }
+    localStorage.setItem("rakashi_phone", phoneNumber)
+    document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
 
     setSaving(false)
     router.push("/dashboard")
@@ -539,6 +566,24 @@ export default function LoginPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Experience years */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">
+                  {lang === "en" ? "Years of Experience" : "अनुभव (वर्ष)"}
+                </label>
+                <select
+                  value={experienceYears}
+                  onChange={(e) => setExperienceYears(Number(e.target.value))}
+                  className="w-full h-14 px-4 rounded-xl bg-input border border-border text-foreground text-base appearance-none"
+                >
+                  <option value={0}>{lang === "en" ? "< 1 year" : "< 1 वर्ष"}</option>
+                  {[1,2,3,4,5,6,7,8,9,10].map(y => (
+                    <option key={y} value={y}>{y} {lang === "en" ? "year(s)" : "वर्ष"}</option>
+                  ))}
+                  <option value={11}>{lang === "en" ? "10+ years" : "10+ वर्ष"}</option>
+                </select>
               </div>
 
               {/* QR scan */}

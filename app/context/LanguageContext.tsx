@@ -66,6 +66,9 @@ const translations: Record<Lang, Record<string, string>> = {
     completeDelivery: 'डिलीवरी पूरी करें',
     loadingMap: 'नक्शा लोड हो रहा है...',
 
+    // === login / registration ===
+    experienceYears: 'अनुभव (वर्ष)',
+
     // === ログイン ===
     login: 'लॉग इन',
     email: 'ईमेल',
@@ -107,9 +110,14 @@ const translations: Record<Lang, Record<string, string>> = {
     declining: 'घट रहा है',
     trustScoreDesc: 'पूर्ण डिलीवरी, समय पर दर और विवाद इतिहास के आधार पर',
     trustScoreBenefit: 'उच्च स्कोर = अधिक प्राथमिकता काम और तेज़ भुगतान',
+    newRank: 'नया',
+    standardRank: 'स्टैंडर्ड',
+    subLeaderRank: 'सब-लीडर',
+    leaderRank: 'लीडर',
 
     // === today-jobs-list ===
     todayJobs: 'आज के काम',
+    noJobsToday: 'आज कोई डिलीवरी नहीं',
     viewAll: 'सब देखें',
     pending: 'लंबित',
     inProgress: 'चल रहा है',
@@ -235,6 +243,9 @@ const translations: Record<Lang, Record<string, string>> = {
     completeDelivery: 'Complete Delivery',
     loadingMap: 'Loading map…',
 
+    // === login / registration ===
+    experienceYears: 'Years of Experience',
+
     // === ログイン ===
     login: 'Login',
     email: 'Email',
@@ -276,9 +287,14 @@ const translations: Record<Lang, Record<string, string>> = {
     declining: 'declining',
     trustScoreDesc: 'Based on completed deliveries, on-time rate & dispute history',
     trustScoreBenefit: 'Higher score = more priority jobs & faster payouts',
+    newRank: 'New',
+    standardRank: 'Standard',
+    subLeaderRank: 'Sub-Leader',
+    leaderRank: 'Leader',
 
     // === today-jobs-list ===
     todayJobs: "Today's Jobs",
+    noJobsToday: 'No deliveries today',
     viewAll: 'View all',
     pending: 'Pending',
     inProgress: 'In Progress',

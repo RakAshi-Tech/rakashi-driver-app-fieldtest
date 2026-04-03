@@ -8,8 +8,16 @@ interface TrustScoreCardProps {
   trend: "up" | "stable" | "down"
 }
 
+function getTrustRank(score: number): { labelKey: string; color: string; icon: string } {
+  if (score >= 80) return { labelKey: 'leaderRank',    color: '#f59e0b', icon: '👑' }
+  if (score >= 60) return { labelKey: 'subLeaderRank', color: '#3b82f6', icon: '⭐' }
+  if (score >= 30) return { labelKey: 'standardRank',  color: '#22c55e', icon: '✓'  }
+  return                   { labelKey: 'newRank',       color: '#6b7280', icon: '🆕' }
+}
+
 export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
   const { t } = useLang()
+  const rank = getTrustRank(score)
 
   const getTrendIcon = () => {
     switch (trend) {
@@ -53,6 +61,12 @@ export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
 
       <div className="flex items-end gap-3 mt-2">
         <span className={`text-4xl font-bold ${getScoreColor()}`}>{score}</span>
+        <span
+          className="mb-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+          style={{ backgroundColor: rank.color }}
+        >
+          {rank.icon} {t(rank.labelKey)}
+        </span>
         <div className="flex-1 pb-2">
           <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
             <div

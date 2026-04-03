@@ -59,6 +59,11 @@ export function TodayJobsList({ jobs }: TodayJobsListProps) {
       </div>
 
       <div className="divide-y divide-border">
+        {jobs.length === 0 && (
+          <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+            {t('noJobsToday')}
+          </div>
+        )}
         {jobs.slice(0, 3).map((job) => (
           <Link
             key={job.id}

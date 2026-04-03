@@ -146,6 +146,29 @@ async function dbRecordTrackPoint(
   }
 }
 
+async function calcTrustScore(driverId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("gps_delivery_summary")
+      .select("on_time, completed_at")
+      .eq("driver_id", driverId)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: false })
+      .limit(30)
+
+    if (!data || data.length === 0) return 10
+
+    const total = data.length
+    const onTimeCount = data.filter((d: { on_time: boolean }) => d.on_time).length
+    const onTimeRate = onTimeCount / total
+    // Base 10 + up to 70 from on-time rate + up to 20 from volume (experience)
+    const volumeBonus = Math.min(total, 20)
+    return Math.min(Math.round(10 + onTimeRate * 70 + volumeBonus), 100)
+  } catch {
+    return 10
+  }
+}
+
 async function dbCompleteDelivery(
   deliveryId: string,
   startedAt: string,
@@ -157,21 +180,22 @@ async function dbCompleteDelivery(
       (now.getTime() - new Date(startedAt).getTime()) / 60000
     )
     const totalDistKm = parseFloat((totalTraveledMeters / 1000).toFixed(2))
+    const onTime      = durationMin <= 60
 
     await supabase
       .from("gps_delivery_summary")
       .update({
-        completed_at:      now.toISOString(),
-        total_distance_km: totalDistKm,
+        completed_at:       now.toISOString(),
+        total_distance_km:  totalDistKm,
         total_duration_min: durationMin,
-        on_time:           true,
+        on_time:            onTime,
       })
       .eq("id", deliveryId)
   } catch (e) {
     console.error("completeDelivery error:", e)
   }
 
-  // Increment driver total_deliveries
+  // Update driver total_deliveries + recalculate trust_score
   try {
     const driverId = localStorage.getItem("driverId") || "demo"
     const { data: profile } = await supabase
@@ -181,9 +205,13 @@ async function dbCompleteDelivery(
       .single()
 
     if (profile) {
+      const newScore = await calcTrustScore(driverId)
       await supabase
         .from("driver_profiles")
-        .update({ total_deliveries: (profile.total_deliveries || 0) + 1 })
+        .update({
+          total_deliveries: (profile.total_deliveries || 0) + 1,
+          trust_score:      newScore,
+        })
         .eq("id", driverId)
     }
   } catch (e) {
