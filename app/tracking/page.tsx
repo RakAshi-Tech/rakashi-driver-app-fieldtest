@@ -6,6 +6,7 @@ import dynamic from "next/dynamic"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
 import type { TrackingMapProps } from "./TrackingMap"
+import { supabase } from "@/lib/supabase"
 
 const TrackingMap = dynamic<TrackingMapProps>(
   () => import("./TrackingMap"),
@@ -95,6 +96,103 @@ function formatMmSs(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+// ── Supabase helpers (module-level, no component state) ───────────────────────
+
+async function dbStartDelivery(destLat: number | null): Promise<string | null> {
+  try {
+    const driverId = localStorage.getItem("driverId") || "demo"
+    const jobId    = localStorage.getItem("jobId")    || "mock-123"
+    const now      = new Date().toISOString()
+
+    const { data, error } = await supabase
+      .from("gps_delivery_summary")
+      .insert({
+        driver_id:  driverId,
+        job_id:     jobId,
+        started_at: now,
+        start_lat:  destLat ?? null,
+      })
+      .select()
+      .single()
+
+    if (error) { console.error("startDelivery error:", error); return null }
+    if (data?.id) {
+      localStorage.setItem("currentDeliveryId", data.id)
+      return data.id as string
+    }
+  } catch (e) {
+    console.error("startDelivery exception:", e)
+  }
+  return null
+}
+
+async function dbRecordTrackPoint(
+  deliveryId: string,
+  pos: GeolocationPosition
+): Promise<void> {
+  try {
+    await supabase
+      .from("gps_track_points")
+      .insert({
+        delivery_id: deliveryId,
+        recorded_at: new Date().toISOString(),
+        lat:         pos.coords.latitude,
+        lng:         pos.coords.longitude,
+        speed:       pos.coords.speed    ?? 0,
+        accuracy:    pos.coords.accuracy,
+      })
+  } catch (e) {
+    console.error("recordTrackPoint failed:", e)
+  }
+}
+
+async function dbCompleteDelivery(
+  deliveryId: string,
+  startedAt: string,
+  totalTraveledMeters: number
+): Promise<void> {
+  try {
+    const now         = new Date()
+    const durationMin = Math.round(
+      (now.getTime() - new Date(startedAt).getTime()) / 60000
+    )
+    const totalDistKm = parseFloat((totalTraveledMeters / 1000).toFixed(2))
+
+    await supabase
+      .from("gps_delivery_summary")
+      .update({
+        completed_at:      now.toISOString(),
+        total_distance_km: totalDistKm,
+        total_duration_min: durationMin,
+        on_time:           true,
+      })
+      .eq("id", deliveryId)
+  } catch (e) {
+    console.error("completeDelivery error:", e)
+  }
+
+  // Increment driver total_deliveries
+  try {
+    const driverId = localStorage.getItem("driverId") || "demo"
+    const { data: profile } = await supabase
+      .from("driver_profiles")
+      .select("total_deliveries")
+      .eq("id", driverId)
+      .single()
+
+    if (profile) {
+      await supabase
+        .from("driver_profiles")
+        .update({ total_deliveries: (profile.total_deliveries || 0) + 1 })
+        .eq("id", driverId)
+    }
+  } catch (e) {
+    console.error("updateDriverProfile error:", e)
+  }
+
+  localStorage.removeItem("currentDeliveryId")
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BG_MAIN  = "#0f0f1a"
@@ -145,7 +243,7 @@ export default function TrackingPage() {
   const [movingDisplay,  setMovingDisplay]  = useState("00:00")
   const [stoppedDisplay, setStoppedDisplay] = useState("00:00")
 
-  // ── Refs ───────────────────────────────────────────────────────────────────
+  // ── Refs (tracking) ────────────────────────────────────────────────────────
   const destRef         = useRef<Destination | null>(null)
   const routeCoordsRef  = useRef<[number, number][]>([])
   const prevPosRef      = useRef<{ pos: [number, number]; time: number } | null>(null)
@@ -157,6 +255,12 @@ export default function TrackingPage() {
   const movingSecsRef   = useRef(0)
   const stoppedSecsRef  = useRef(0)
   const langRef         = useRef<'hi' | 'en'>('hi')
+
+  // ── Refs (Supabase) ────────────────────────────────────────────────────────
+  const deliveryIdRef       = useRef<string | null>(null)
+  const startedAtRef        = useRef<string>(new Date().toISOString())
+  const lastRecordedRef     = useRef<number>(0)
+  const totalTraveledRef    = useRef<number>(0)   // meters accumulated via GPS
 
   // Keep refs in sync
   useEffect(() => { destRef.current        = dest        }, [dest])
@@ -198,6 +302,20 @@ export default function TrackingPage() {
     } else {
       needsOsrmRef.current = true
     }
+  }, [])
+
+  // ── STEP 2: Start delivery record in Supabase ──────────────────────────────
+  useEffect(() => {
+    const start = async () => {
+      const destRaw = localStorage.getItem("destination")
+      const destLat = destRaw ? (JSON.parse(destRaw) as Destination).lat : null
+      const now = new Date().toISOString()
+      startedAtRef.current = now
+
+      const id = await dbStartDelivery(destLat)
+      if (id) deliveryIdRef.current = id
+    }
+    start()
   }, [])
 
   // ── OSRM fallback ──────────────────────────────────────────────────────────
@@ -284,6 +402,22 @@ export default function TrackingPage() {
       setCurrentLocation(curr)
       setAccuracy(Math.round(pos.coords.accuracy))
 
+      // ── STEP 3: Accumulate traveled distance (before prevPosRef update) ────
+      if (prevPosRef.current) {
+        const stepM = haversineDistance(
+          prevPosRef.current.pos[0], prevPosRef.current.pos[1],
+          curr[0], curr[1]
+        )
+        totalTraveledRef.current += stepM
+      }
+
+      // ── STEP 3: Record track point — throttled to 30s ─────────────────────
+      const tsNow = Date.now()
+      if (tsNow - lastRecordedRef.current > 30000 && deliveryIdRef.current) {
+        lastRecordedRef.current = tsNow
+        dbRecordTrackPoint(deliveryIdRef.current, pos)
+      }
+
       if (!isRecordingRef.current) return
 
       const d = destRef.current
@@ -334,6 +468,19 @@ export default function TrackingPage() {
     )
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
+
+  // ── STEP 4: Complete delivery on "I'm at the destination" ─────────────────
+  const handleAtDestination = () => {
+    // Fire-and-forget: don't block navigation on Supabase write
+    if (deliveryIdRef.current) {
+      dbCompleteDelivery(
+        deliveryIdRef.current,
+        startedAtRef.current,
+        totalTraveledRef.current
+      ).catch((e) => console.error("completeDelivery failed:", e))
+    }
+    router.push("/arrival")
+  }
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const destTuple: [number, number] = dest ? [dest.lat, dest.lng] : [28.6139, 77.209]
@@ -504,7 +651,7 @@ export default function TrackingPage() {
       {/* ── I'm at the destination ─────────────────────────────────────────── */}
       <div style={{ padding: "10px 16px 4px", flexShrink: 0 }}>
         <button
-          onClick={() => router.push("/arrival")}
+          onClick={handleAtDestination}
           style={{ width: "100%", height: "52px", backgroundColor: ORANGE, color: "#fff", border: "none", borderRadius: "12px", fontSize: "15px", fontWeight: "bold", cursor: "pointer" }}
         >
           {t('atDestination')}
