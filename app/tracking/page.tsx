@@ -147,25 +147,47 @@ async function dbRecordTrackPoint(
 }
 
 async function calcTrustScore(driverId: string): Promise<number> {
+  let currentScore = 10
   try {
-    const { data } = await supabase
+    const { data: profile } = await supabase
+      .from("driver_profiles")
+      .select("trust_score, total_deliveries")
+      .eq("id", driverId)
+      .single()
+
+    if (!profile) return 10
+    currentScore = profile.trust_score ?? 10
+
+    const { data: deliveries } = await supabase
       .from("gps_delivery_summary")
       .select("on_time, completed_at")
       .eq("driver_id", driverId)
       .not("completed_at", "is", null)
-      .order("completed_at", { ascending: false })
-      .limit(30)
 
-    if (!data || data.length === 0) return 10
+    const total = deliveries?.length ?? 0
+    const onTimeCount = deliveries?.filter((d: { on_time: boolean }) => d.on_time).length ?? 0
+    const onTimeRate = total > 0 ? onTimeCount / total : 1.0
 
-    const total = data.length
-    const onTimeCount = data.filter((d: { on_time: boolean }) => d.on_time).length
-    const onTimeRate = onTimeCount / total
-    // Base 10 + up to 70 from on-time rate + up to 20 from volume (experience)
-    const volumeBonus = Math.min(total, 20)
-    return Math.min(Math.round(10 + onTimeRate * 70 + volumeBonus), 100)
-  } catch {
-    return 10
+    // 配送件数ボーナス（上限60点）— 対数スケール
+    // 500件≈18点, 2000件≈30点, 6000件≈50点
+    const deliveryBonus = total === 0
+      ? 0
+      : Math.min(Math.floor(Math.log10(total + 1) * 17), 60)
+
+    // 時間厳守ボーナス（最大25点）
+    const onTimeBonus = Math.floor(onTimeRate * 25)
+
+    // 長期継続ボーナス（最大15点）— 1000件ごとに1点
+    const continuityBonus = Math.min(Math.floor(total / 1000), 15)
+
+    // 合計（初期値10 + 各ボーナス、上限100）
+    const newScore = Math.min(10 + deliveryBonus + onTimeBonus + continuityBonus, 100)
+
+    // スコアは下がらない（与信記録として保護）
+    return Math.max(newScore, currentScore)
+  } catch (err) {
+    console.error("calcTrustScore error:", err)
+    return currentScore
   }
 }
 

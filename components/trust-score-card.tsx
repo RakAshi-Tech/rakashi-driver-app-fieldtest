@@ -9,10 +9,10 @@ interface TrustScoreCardProps {
 }
 
 function getTrustRank(score: number): { labelKey: string; color: string; icon: string } {
-  if (score >= 80) return { labelKey: 'leaderRank',    color: '#f59e0b', icon: '👑' }
-  if (score >= 60) return { labelKey: 'subLeaderRank', color: '#3b82f6', icon: '⭐' }
-  if (score >= 30) return { labelKey: 'standardRank',  color: '#22c55e', icon: '✓'  }
-  return                   { labelKey: 'newRank',       color: '#6b7280', icon: '🆕' }
+  if (score >= 80) return { labelKey: 'leaderRank',    color: '#f97316', icon: '🟠' }
+  if (score >= 60) return { labelKey: 'subLeaderRank', color: '#3b82f6', icon: '🔵' }
+  if (score >= 30) return { labelKey: 'standardRank',  color: '#eab308', icon: '🟡' }
+  return                   { labelKey: 'newRank',       color: '#ef4444', icon: '🔴' }
 }
 
 export function TrustScoreCard({ score, trend }: TrustScoreCardProps) {
