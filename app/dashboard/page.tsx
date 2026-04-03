@@ -9,6 +9,8 @@ import { CompletedJobsList } from "@/components/completed-jobs-list"
 import { Button } from "@/components/ui/button"
 import { Truck } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { useLang } from "@/app/context/LanguageContext"
+import { LangToggle } from "@/app/components/LangToggle"
 
 const mockDriverData = {
   name: "Rajaram Kumar",
@@ -54,7 +56,7 @@ const mockJobs: Job[] = [
 
 export default function HomePage() {
   const router = useRouter()
-  const [language, setLanguage] = useState<"en" | "hi">("en")
+  const { t } = useLang()
   const [driverProfile, setDriverProfile] = useState<any>(null)
 
   useEffect(() => {
@@ -62,7 +64,7 @@ export default function HomePage() {
       const phone = localStorage.getItem("rakashi_phone")
       if (!phone) return
 
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("driver_profiles")
         .select("*")
         .eq("phone_number", phone)
@@ -91,44 +93,16 @@ export default function HomePage() {
             <Truck className="h-5 w-5 text-primary" />
             <span className="text-sm font-semibold text-foreground">DriverHub</span>
           </div>
-
-          {/* Language Toggle */}
-          <div className="flex items-center bg-secondary rounded-md p-0.5">
-            <button
-              onClick={() => setLanguage("en")}
-              className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                language === "en"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => setLanguage("hi")}
-              className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                language === "hi"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              हिंदी
-            </button>
-          </div>
+          <LangToggle />
         </div>
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col p-3 gap-3 overflow-hidden">
-          {/* Driver Profile Card */}
           <DriverProfileCard
             {...mockDriverData}
             name={driverProfile?.name ?? mockDriverData.name}
           />
-
-          {/* Trust Score Card */}
           <TrustScoreCard score={driverProfile?.trust_score ?? 87} trend="up" />
-
-          {/* Today's Jobs */}
           <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
             <TodayJobsList jobs={activeJobs} />
             <CompletedJobsList jobs={completedJobs} />
@@ -142,17 +116,16 @@ export default function HomePage() {
             variant="outline"
             className="w-full h-12 text-base font-semibold rounded-xl border border-primary text-primary"
           >
-            Set Destination
+            {t('setDestinationBtn')}
           </Button>
           <Button
             onClick={handleStartNextJob}
             disabled={!firstPendingJob}
             className="w-full h-14 text-base font-bold rounded-xl bg-primary hover:bg-primary/90 text-white"
           >
-            {firstPendingJob ? "Start next job" : "No pending jobs"}
+            {firstPendingJob ? t('startNextJob') : t('noPendingJobs')}
           </Button>
         </div>
-
     </div>
   )
 }

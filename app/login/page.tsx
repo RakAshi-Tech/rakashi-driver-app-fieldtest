@@ -6,9 +6,10 @@ import { MessageCircle, Camera, CheckCircle2, Truck, Phone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
+import { useLang } from "@/app/context/LanguageContext"
+import { LangToggle } from "@/app/components/LangToggle"
 
 type Screen = "phone" | "otp" | "profile"
-type Language = "en" | "hi"
 type VehicleType = "E-Rickshaw" | "Cargo Bike" | "Other"
 type LoginTab = "whatsapp" | "sms"
 
@@ -28,8 +29,8 @@ async function sendSmsOTP(phoneNumber: string) {
 
 export default function LoginPage() {
   const router = useRouter()
+  const { lang } = useLang()
   const [screen, setScreen] = useState<Screen>("phone")
-  const [language, setLanguage] = useState<Language>("en")
   const [loginTab, setLoginTab] = useState<LoginTab>("whatsapp")
 
   // Phone screen
@@ -70,7 +71,7 @@ export default function LoginPage() {
   // --- Screen 1: Send OTP ---
   const handleSendOTP = async () => {
     if (phone.length < 10) {
-      setPhoneError(language === "en" ? "Please enter a valid 10-digit number" : "कृपया 10 अंकों का नंबर दर्ज करें")
+      setPhoneError(lang === "en" ? "Please enter a valid 10-digit number" : "कृपया 10 अंकों का नंबर दर्ज करें")
       return
     }
     setSending(true)
@@ -142,7 +143,7 @@ export default function LoginPage() {
     }
 
     // 本物のOTP検証（将来用）
-    setOtpError(language === "en" ? "Invalid OTP. Please try again." : "अमान्य OTP। पुनः प्रयास करें।")
+    setOtpError(lang === "en" ? "Invalid OTP. Please try again." : "अमान्य OTP। पुनः प्रयास करें।")
     setOtp(["", "", "", "", "", ""])
     otpRefs.current[0]?.focus()
     setVerifying(false)
@@ -179,7 +180,7 @@ export default function LoginPage() {
 
   const handleCompleteRegistration = async () => {
     if (!name.trim()) {
-      setNameError(language === "en" ? "Please enter your name" : "कृपया अपना नाम दर्ज करें")
+      setNameError(lang === "en" ? "Please enter your name" : "कृपया अपना नाम दर्ज करें")
       return
     }
     setSaving(true)
@@ -204,8 +205,8 @@ export default function LoginPage() {
   // OTP screen colors based on active tab
   const otpBubbleColor = loginTab === "whatsapp" ? "#25D366" : "#F97316"
   const otpCheckMessage = loginTab === "whatsapp"
-    ? (language === "en" ? "Check your WhatsApp" : "अपना WhatsApp चेक करें")
-    : (language === "en" ? "Check your SMS messages" : "अपने SMS संदेश चेक करें")
+    ? (lang === "en" ? "Check your WhatsApp" : "अपना WhatsApp चेक करें")
+    : (lang === "en" ? "Check your SMS messages" : "अपने SMS संदेश चेक करें")
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -221,24 +222,7 @@ export default function LoginPage() {
 
       {/* Language toggle */}
       <div className="flex justify-end px-4 pt-3">
-        <div className="flex bg-secondary rounded-md overflow-hidden text-[10px] font-medium border border-border">
-          <button
-            onClick={() => setLanguage("en")}
-            className={`px-3 py-1.5 transition-colors ${
-              language === "en" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            EN
-          </button>
-          <button
-            onClick={() => setLanguage("hi")}
-            className={`px-3 py-1.5 transition-colors ${
-              language === "hi" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            हिंदी
-          </button>
-        </div>
+        <LangToggle />
       </div>
 
       <div className="flex-1 flex flex-col px-6 py-4 max-w-md mx-auto w-full">
@@ -281,10 +265,10 @@ export default function LoginPage() {
                     <MessageCircle className="w-10 h-10 text-white" fill="white" />
                   </div>
                   <h1 className="text-2xl font-bold text-foreground mb-1">
-                    {language === "en" ? "Login with WhatsApp" : "WhatsApp से लॉगिन करें"}
+                    {lang === "en" ? "Login with WhatsApp" : "WhatsApp से लॉगिन करें"}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {language === "en" ? "Enter your WhatsApp number to continue" : "जारी रखने के लिए WhatsApp नंबर दर्ज करें"}
+                    {lang === "en" ? "Enter your WhatsApp number to continue" : "जारी रखने के लिए WhatsApp नंबर दर्ज करें"}
                   </p>
                 </div>
 
@@ -295,7 +279,7 @@ export default function LoginPage() {
                     </div>
                     <Input
                       type="tel"
-                      placeholder={language === "en" ? "10-digit number" : "10 अंकों का नंबर"}
+                      placeholder={lang === "en" ? "10-digit number" : "10 अंकों का नंबर"}
                       value={phone}
                       onChange={(e) => {
                         setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
@@ -308,7 +292,7 @@ export default function LoginPage() {
                   {sentMsg && (
                     <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: "#25D366" }}>
                       <CheckCircle2 className="w-4 h-4" />
-                      {language === "en" ? "OTP sent to WhatsApp ✅" : "WhatsApp पर OTP भेजा गया ✅"}
+                      {lang === "en" ? "OTP sent to WhatsApp ✅" : "WhatsApp पर OTP भेजा गया ✅"}
                     </p>
                   )}
                 </div>
@@ -322,18 +306,18 @@ export default function LoginPage() {
                   {sending ? (
                     <div className="flex items-center gap-2">
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {language === "en" ? "Sending..." : "भेजा जा रहा है..."}
+                      {lang === "en" ? "Sending..." : "भेजा जा रहा है..."}
                     </div>
                   ) : (
                     <>
                       <MessageCircle className="w-5 h-5 mr-2" />
-                      {language === "en" ? "Send OTP via WhatsApp" : "WhatsApp पर OTP भेजें"}
+                      {lang === "en" ? "Send OTP via WhatsApp" : "WhatsApp पर OTP भेजें"}
                     </>
                   )}
                 </Button>
 
                 <p className="text-xs text-muted-foreground text-center mt-4">
-                  {language === "en"
+                  {lang === "en"
                     ? "We'll send a one-time code via WhatsApp"
                     : "हम WhatsApp के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे"}
                 </p>
@@ -348,10 +332,10 @@ export default function LoginPage() {
                     <Phone className="w-10 h-10 text-white" />
                   </div>
                   <h1 className="text-2xl font-bold text-foreground mb-1">
-                    {language === "en" ? "Login with Phone" : "फोन से लॉगिन करें"}
+                    {lang === "en" ? "Login with Phone" : "फोन से लॉगिन करें"}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {language === "en" ? "We'll send a verification code via SMS" : "हम SMS के माध्यम से सत्यापन कोड भेजेंगे"}
+                    {lang === "en" ? "We'll send a verification code via SMS" : "हम SMS के माध्यम से सत्यापन कोड भेजेंगे"}
                   </p>
                 </div>
 
@@ -362,7 +346,7 @@ export default function LoginPage() {
                     </div>
                     <Input
                       type="tel"
-                      placeholder={language === "en" ? "10-digit number" : "10 अंकों का नंबर"}
+                      placeholder={lang === "en" ? "10-digit number" : "10 अंकों का नंबर"}
                       value={phone}
                       onChange={(e) => {
                         setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
@@ -375,7 +359,7 @@ export default function LoginPage() {
                   {sentMsg && (
                     <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: "#F97316" }}>
                       <CheckCircle2 className="w-4 h-4" />
-                      {language === "en" ? "OTP sent via SMS ✅" : "SMS पर OTP भेजा गया ✅"}
+                      {lang === "en" ? "OTP sent via SMS ✅" : "SMS पर OTP भेजा गया ✅"}
                     </p>
                   )}
                 </div>
@@ -389,18 +373,18 @@ export default function LoginPage() {
                   {sending ? (
                     <div className="flex items-center gap-2">
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {language === "en" ? "Sending..." : "भेजा जा रहा है..."}
+                      {lang === "en" ? "Sending..." : "भेजा जा रहा है..."}
                     </div>
                   ) : (
                     <>
                       <Phone className="w-5 h-5 mr-2" />
-                      {language === "en" ? "Send OTP via SMS" : "SMS पर OTP भेजें"}
+                      {lang === "en" ? "Send OTP via SMS" : "SMS पर OTP भेजें"}
                     </>
                   )}
                 </Button>
 
                 <p className="text-xs text-muted-foreground text-center mt-4">
-                  {language === "en"
+                  {lang === "en"
                     ? "We'll send a one-time code via SMS"
                     : "हम SMS के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे"}
                 </p>
@@ -420,10 +404,10 @@ export default function LoginPage() {
                 }
               </div>
               <h1 className="text-xl font-bold text-foreground mb-1">
-                {language === "en" ? "Enter OTP" : "OTP दर्ज करें"}
+                {lang === "en" ? "Enter OTP" : "OTP दर्ज करें"}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {language === "en" ? `Sent to +91 ${phone}` : `+91 ${phone} पर भेजा गया`}
+                {lang === "en" ? `Sent to +91 ${phone}` : `+91 ${phone} पर भेजा गया`}
               </p>
             </div>
 
@@ -432,7 +416,7 @@ export default function LoginPage() {
               <div className="rounded-2xl rounded-tl-none px-4 py-3 max-w-[85%]" style={{ backgroundColor: otpBubbleColor }}>
                 <p className="text-white text-xs font-medium mb-1">RakAshi Driver</p>
                 <p className="text-white text-sm">
-                  {language === "en"
+                  {lang === "en"
                     ? "Your RakAshi verification code: "
                     : "आपका RakAshi सत्यापन कोड: "}
                   <span className="font-black tracking-widest">██████</span>
@@ -475,10 +459,10 @@ export default function LoginPage() {
               {verifying ? (
                 <div className="flex items-center gap-2">
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  {language === "en" ? "Verifying..." : "सत्यापित हो रहा है..."}
+                  {lang === "en" ? "Verifying..." : "सत्यापित हो रहा है..."}
                 </div>
               ) : (
-                language === "en" ? "Verify OTP" : "OTP सत्यापित करें"
+                lang === "en" ? "Verify OTP" : "OTP सत्यापित करें"
               )}
             </Button>
 
@@ -490,15 +474,15 @@ export default function LoginPage() {
                 className={resendTimer > 0 ? "text-muted-foreground" : "text-primary hover:underline"}
               >
                 {resendTimer > 0
-                  ? `${language === "en" ? "Resend in" : "पुनः भेजें"} 0:${resendTimer.toString().padStart(2, "0")}`
-                  : (language === "en" ? "Resend OTP" : "OTP पुनः भेजें")}
+                  ? `${lang === "en" ? "Resend in" : "पुनः भेजें"} 0:${resendTimer.toString().padStart(2, "0")}`
+                  : (lang === "en" ? "Resend OTP" : "OTP पुनः भेजें")}
               </button>
               <span className="text-border">·</span>
               <button
                 onClick={() => { setScreen("phone"); setOtp(["", "", "", "", "", ""]); setOtpError("") }}
                 className="text-muted-foreground hover:text-foreground"
               >
-                {language === "en" ? "Change number" : "नंबर बदलें"}
+                {lang === "en" ? "Change number" : "नंबर बदलें"}
               </button>
             </div>
           </>
@@ -512,10 +496,10 @@ export default function LoginPage() {
                 <Truck className="w-8 h-8 text-primary" />
               </div>
               <h1 className="text-xl font-bold text-foreground mb-1">
-                {language === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"}
+                {lang === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {language === "en" ? "Tell us about yourself" : "अपने बारे में बताएं"}
+                {lang === "en" ? "Tell us about yourself" : "अपने बारे में बताएं"}
               </p>
             </div>
 
@@ -523,11 +507,11 @@ export default function LoginPage() {
               {/* Name */}
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">
-                  {language === "en" ? "Your name" : "आपका नाम"}
+                  {lang === "en" ? "Your name" : "आपका नाम"}
                 </label>
                 <Input
                   type="text"
-                  placeholder={language === "en" ? "Enter your full name" : "अपना पूरा नाम दर्ज करें"}
+                  placeholder={lang === "en" ? "Enter your full name" : "अपना पूरा नाम दर्ज करें"}
                   value={name}
                   onChange={(e) => { setName(e.target.value); setNameError("") }}
                   className="h-14 bg-input border-border text-foreground placeholder:text-muted-foreground rounded-xl text-base"
@@ -538,7 +522,7 @@ export default function LoginPage() {
               {/* Vehicle type */}
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">
-                  {language === "en" ? "Vehicle type" : "वाहन का प्रकार"}
+                  {lang === "en" ? "Vehicle type" : "वाहन का प्रकार"}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {vehicleOptions.map((v) => (
@@ -560,13 +544,13 @@ export default function LoginPage() {
               {/* QR scan */}
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">
-                  {language === "en" ? "Vehicle QR Code (optional)" : "वाहन QR कोड (वैकल्पिक)"}
+                  {lang === "en" ? "Vehicle QR Code (optional)" : "वाहन QR कोड (वैकल्पिक)"}
                 </label>
                 {vehicleCode ? (
                   <div className="h-14 flex items-center gap-2 px-4 rounded-xl bg-green-500/10 border border-green-500/30">
                     <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
                     <span className="text-sm text-green-500 font-medium">
-                      {language === "en" ? "Vehicle linked ✅" : "वाहन लिंक किया गया ✅"} {vehicleCode}
+                      {lang === "en" ? "Vehicle linked ✅" : "वाहन लिंक किया गया ✅"} {vehicleCode}
                     </span>
                   </div>
                 ) : (
@@ -578,12 +562,12 @@ export default function LoginPage() {
                     {scanning ? (
                       <>
                         <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-                        {language === "en" ? "Scanning..." : "स्कैन हो रहा है..."}
+                        {lang === "en" ? "Scanning..." : "स्कैन हो रहा है..."}
                       </>
                     ) : (
                       <>
                         <Camera className="w-5 h-5" />
-                        {language === "en" ? "Scan Vehicle QR Code" : "वाहन QR कोड स्कैन करें"}
+                        {lang === "en" ? "Scan Vehicle QR Code" : "वाहन QR कोड स्कैन करें"}
                       </>
                     )}
                   </button>
@@ -599,10 +583,10 @@ export default function LoginPage() {
               {saving ? (
                 <div className="flex items-center gap-2">
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  {language === "en" ? "Saving..." : "सहेजा जा रहा है..."}
+                  {lang === "en" ? "Saving..." : "सहेजा जा रहा है..."}
                 </div>
               ) : (
-                language === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"
+                lang === "en" ? "Complete Registration" : "पंजीकरण पूरा करें"
               )}
             </Button>
           </>
@@ -617,7 +601,7 @@ export default function LoginPage() {
             }}
             className="mt-6 w-full py-3 text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
           >
-            {language === "en" ? "Demo login (skip OTP)" : "डेमो लॉगिन (OTP छोड़ें)"}
+            {lang === "en" ? "Demo login (skip OTP)" : "डेमो लॉगिन (OTP छोड़ें)"}
           </button>
         )}
       </div>

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { APIProvider, Map, Marker, MapMouseEvent, useMap } from "@vis.gl/react-google-maps"
 import { Button } from "@/components/ui/button"
 import { MapPin } from "lucide-react"
+import { useLang } from "@/app/context/LanguageContext"
+import { LangToggle } from "@/app/components/LangToggle"
 
 const DELHI_CENTER = { lat: 28.6139, lng: 77.209 }
 
@@ -53,13 +55,14 @@ function RoutePolyline({ points }: { points: { lat: number; lng: number }[] }) {
 interface RouteInfo {
   distanceText: string
   durationText: string
-  distanceValue: number   // meters
-  durationValue: number   // seconds
+  distanceValue: number
+  durationValue: number
   polylinePoints: { lat: number; lng: number }[]
 }
 
 export default function SetDestinationPage() {
   const router = useRouter()
+  const { t } = useLang()
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""
 
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null)
@@ -97,8 +100,8 @@ export default function SetDestinationPage() {
         setRouteInfo({
           distanceText: leg.distance.text,
           durationText: leg.duration.text,
-          distanceValue: leg.distance.value,   // meters (number)
-          durationValue: leg.duration.value,   // seconds (number)
+          distanceValue: leg.distance.value,
+          durationValue: leg.duration.value,
           polylinePoints,
         })
       }
@@ -119,7 +122,6 @@ export default function SetDestinationPage() {
 
   const handleSetDestination = () => {
     if (!selected) return
-    // Save route coordinates as [[lat, lng], ...] for Leaflet
     if (routeInfo) {
       const coordinates = routeInfo.polylinePoints.map(p => [p.lat, p.lng])
       localStorage.setItem("route", JSON.stringify({ coordinates }))
@@ -129,8 +131,8 @@ export default function SetDestinationPage() {
       JSON.stringify({
         lat: selected.lat,
         lng: selected.lng,
-        distance: routeInfo?.distanceValue ?? 0,   // meters
-        duration: routeInfo?.durationValue ?? 0,   // seconds
+        distance: routeInfo?.distanceValue ?? 0,
+        duration: routeInfo?.durationValue ?? 0,
       })
     )
     router.push("/tracking")
@@ -139,10 +141,11 @@ export default function SetDestinationPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
-      <div className="px-4 py-3 bg-card border-b border-border shrink-0">
-        <p className="text-sm font-medium text-center text-muted-foreground">
-          Tap on map to set destination
+      <div className="px-4 py-3 bg-card border-b border-border shrink-0 flex items-center justify-between">
+        <p className="text-sm font-medium text-muted-foreground">
+          {t('tapMapInstruction')}
         </p>
+        <LangToggle />
       </div>
 
       {/* Map */}
@@ -160,7 +163,7 @@ export default function SetDestinationPage() {
               {currentLocation && (
                 <Marker
                   position={currentLocation}
-                  title="You are here"
+                  title={t('currentLocation')}
                   icon={{
                     path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
                     fillColor: "#4285F4",
@@ -175,7 +178,7 @@ export default function SetDestinationPage() {
               {selected && (
                 <Marker
                   position={selected}
-                  title="Destination"
+                  title={t('setDestination')}
                   icon={{
                     path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
                     fillColor: "#F97316",
@@ -203,17 +206,17 @@ export default function SetDestinationPage() {
       <div className="p-4 bg-card border-t border-border shrink-0 space-y-3">
         {!selected ? (
           <p className="text-sm text-muted-foreground text-center">
-            Tap on the map to set your destination
+            {t('tapMapInstruction')}
           </p>
         ) : (
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">📍 Destination set</p>
+            <p className="text-sm font-semibold text-foreground">📍 {t('destinationSet')}</p>
             {loadingRoute ? (
-              <p className="text-sm text-muted-foreground">Calculating route…</p>
+              <p className="text-sm text-muted-foreground">{t('calculating')}</p>
             ) : routeInfo ? (
               <>
-                <p className="text-sm text-foreground">📏 Distance: {routeInfo.distanceText}</p>
-                <p className="text-sm text-foreground">⏱️ Walking time: {routeInfo.durationText}</p>
+                <p className="text-sm text-foreground">📏 {t('distance')}: {routeInfo.distanceText}</p>
+                <p className="text-sm text-foreground">⏱️ {t('walkingTime')}: {routeInfo.durationText}</p>
               </>
             ) : null}
           </div>
@@ -225,7 +228,7 @@ export default function SetDestinationPage() {
           className="w-full h-14 text-base font-bold rounded-xl text-white"
           style={{ backgroundColor: selected && !loadingRoute ? "#F97316" : undefined }}
         >
-          Set as Destination
+          {t('setAsDestination')}
         </Button>
 
         <Button
@@ -233,7 +236,7 @@ export default function SetDestinationPage() {
           variant="outline"
           className="w-full h-12 text-base font-semibold rounded-xl"
         >
-          Cancel
+          {t('cancel')}
         </Button>
       </div>
     </div>

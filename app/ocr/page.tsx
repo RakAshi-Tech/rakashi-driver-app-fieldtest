@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HelpCircle, FileText, Sparkles, Mic, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLang } from "@/app/context/LanguageContext";
+import { LangToggle } from "@/app/components/LangToggle";
 import { DocumentScanView } from "@/components/ocr/document-scan-view";
 import {
   OcrFieldRow,
@@ -14,8 +16,6 @@ import { HelpModal } from "@/components/ocr/help-modal";
 import { VoiceInputModal } from "@/components/ocr/voice-input-modal";
 import { DirectInputModal } from "@/components/ocr/direct-input-modal";
 import { supabase } from "@/lib/supabase";
-
-type Language = "en" | "hi";
 
 interface OcrField {
   id: string;
@@ -46,9 +46,8 @@ function fileToBase64(file: File): Promise<string> {
 
 export default function WaybillOcrPage() {
   const router = useRouter();
+  const { lang: language } = useLang();
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [language, setLanguage] = useState<Language>("en");
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lightCondition] = useState<"ok" | "dark">("ok");
@@ -223,28 +222,7 @@ export default function WaybillOcrPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* Language toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-border/50 text-xs">
-            <button
-              onClick={() => setLanguage("en")}
-              className={`px-2.5 py-1.5 transition-colors ${
-                language === "en"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary/50 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => setLanguage("hi")}
-              className={`px-2.5 py-1.5 transition-colors ${
-                language === "hi"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary/50 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              हिंदी
-            </button>
-          </div>
+          <LangToggle />
           {/* Help button */}
           <Button
             variant="ghost"
