@@ -3,15 +3,21 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { Button } from "@/components/ui/button"
 import type { TrackingMapProps } from "./TrackingMap"
 
 const TrackingMap = dynamic<TrackingMapProps>(
   () => import("./TrackingMap"),
-  { ssr: false, loading: () => <div className="w-full h-full flex items-center justify-center text-sm text-muted-foreground bg-secondary">Loading map…</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#16213e", color: "#9ca3af", fontSize: "13px" }}>
+        Loading map…
+      </div>
+    ),
+  }
 )
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Destination {
   lat: number
@@ -20,10 +26,12 @@ interface Destination {
   duration: number  // seconds
 }
 
-type MovingStatus = "STOPPED" | "MOVING"
+type MovingStatus   = "STOPPED" | "MOVING"
 type DeliveryStatus = "Preparing" | "En Route" | "Approaching" | "Arrived"
+type MapType        = "street" | "satellite"
+type Language       = "en" | "hi"
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Pure helpers ──────────────────────────────────────────────────────────────
 
 const haversineDistance = (
   lat1: number, lng1: number,
@@ -80,35 +88,96 @@ function formatEta(minutes: number): string {
   return `${Math.round(minutes)} min`
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+function formatMmSs(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const BG_MAIN  = "#0f0f1a"
+const BG_CARD  = "#16213e"
+const ORANGE   = "#f97316"
+const GRAY_SUB = "#9ca3af"
+const GRAY_BAR = "#374151"
+
+const DELIVERY_BADGE_COLOR: Record<DeliveryStatus, string> = {
+  Preparing:   "#6b7280",
+  "En Route":  "#3b82f6",
+  Approaching: ORANGE,
+  Arrived:     "#22c55e",
+}
+
+const DELIVERY_PROGRESS: Record<DeliveryStatus, number> = {
+  Preparing:   0,
+  "En Route":  33,
+  Approaching: 66,
+  Arrived:     100,
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function TrackingPage() {
   const router = useRouter()
 
-  const [dest, setDest] = useState<Destination | null>(null)
-  const [routeCoords, setRouteCoords] = useState<[number, number][]>([])
+  // ── UI state ─────────────────────────────────────────────────────────────
+  const [mapType, setMapType]               = useState<MapType>("street")
+  const [language, setLanguage]             = useState<Language>("en")
+  const [isRecording, setIsRecording]       = useState(true)
+  const [forceCenterTrigger, setForceCenterTrigger] = useState(0)
+
+  // ── Tracking state ────────────────────────────────────────────────────────
+  const [dest, setDest]                     = useState<Destination | null>(null)
+  const [routeCoords, setRouteCoords]       = useState<[number, number][]>([])
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null)
-  const [speed, setSpeed] = useState(0)
-  const [movingStatus, setMovingStatus] = useState<MovingStatus>("STOPPED")
+  const [accuracy, setAccuracy]             = useState<number | undefined>(undefined)
+  const [speed, setSpeed]                   = useState(0)
+  const [movingStatus, setMovingStatus]     = useState<MovingStatus>("STOPPED")
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>("Preparing")
-  const [remainingDist, setRemainingDist] = useState(0)
-  const [eta, setEta] = useState(0)
-  const [showDeviation, setShowDeviation] = useState(false)
-  const [showArrived, setShowArrived] = useState(false)
+  const [remainingDist, setRemainingDist]   = useState(0)
+  const [eta, setEta]                       = useState(0)
+  const [showDeviation, setShowDeviation]   = useState(false)
+  const [showArrived, setShowArrived]       = useState(false)
 
-  // Refs for mutable values accessed inside GPS callback
-  const destRef = useRef<Destination | null>(null)
-  const routeCoordsRef = useRef<[number, number][]>([])
-  const prevPosRef = useRef<{ pos: [number, number]; time: number } | null>(null)
+  // ── Timer state (MM:SS) ───────────────────────────────────────────────────
+  const [movingDisplay,  setMovingDisplay]  = useState("00:00")
+  const [stoppedDisplay, setStoppedDisplay] = useState("00:00")
+
+  // ── Refs ──────────────────────────────────────────────────────────────────
+  const destRef         = useRef<Destination | null>(null)
+  const routeCoordsRef  = useRef<[number, number][]>([])
+  const prevPosRef      = useRef<{ pos: [number, number]; time: number } | null>(null)
   const arrivedShownRef = useRef(false)
-  const needsOsrmRef = useRef(false)
-  const osrmFetchedRef = useRef(false)
+  const needsOsrmRef    = useRef(false)
+  const osrmFetchedRef  = useRef(false)
+  const isRecordingRef  = useRef(true)
+  const movingStatusRef = useRef<MovingStatus>("STOPPED")
+  const movingSecsRef   = useRef(0)
+  const stoppedSecsRef  = useRef(0)
 
-  // Keep refs in sync with state
-  useEffect(() => { destRef.current = dest }, [dest])
+  // Keep refs in sync
+  useEffect(() => { destRef.current        = dest        }, [dest])
   useEffect(() => { routeCoordsRef.current = routeCoords }, [routeCoords])
+  useEffect(() => { isRecordingRef.current = isRecording }, [isRecording])
+  useEffect(() => { movingStatusRef.current = movingStatus }, [movingStatus])
 
-  // ── Load from localStorage ─────────────────────────────────────────────────
+  // ── MOVING / STOPPED timer ────────────────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!isRecordingRef.current) return
+      if (movingStatusRef.current === "MOVING") {
+        movingSecsRef.current++
+        setMovingDisplay(formatMmSs(movingSecsRef.current))
+      } else {
+        stoppedSecsRef.current++
+        setStoppedDisplay(formatMmSs(stoppedSecsRef.current))
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  // ── Load from localStorage ────────────────────────────────────────────────
   useEffect(() => {
     const destRaw = localStorage.getItem("destination")
     if (destRaw) {
@@ -116,7 +185,7 @@ export default function TrackingPage() {
       setDest(d)
       destRef.current = d
       setRemainingDist(d.distance)
-      setEta((d.distance / 1000 / 4) * 60) // initial ETA at walking speed
+      setEta((d.distance / 1000 / 4) * 60)
     }
     const routeRaw = localStorage.getItem("route")
     if (routeRaw) {
@@ -128,7 +197,7 @@ export default function TrackingPage() {
     }
   }, [])
 
-  // ── Fetch OSRM route if not in localStorage (needs GPS first) ──────────────
+  // ── Fetch OSRM if no route in localStorage ────────────────────────────────
   useEffect(() => {
     if (!needsOsrmRef.current || osrmFetchedRef.current) return
     if (!dest || !currentLocation) return
@@ -150,7 +219,7 @@ export default function TrackingPage() {
       .catch((e) => console.error("OSRM initial fetch failed:", e))
   }, [dest, currentLocation])
 
-  // ── Arrived overlay ────────────────────────────────────────────────────────
+  // ── Arrived overlay (show once) ───────────────────────────────────────────
   useEffect(() => {
     if (deliveryStatus === "Arrived" && !arrivedShownRef.current) {
       arrivedShownRef.current = true
@@ -159,7 +228,7 @@ export default function TrackingPage() {
     }
   }, [deliveryStatus])
 
-  // ── GPS watchPosition ──────────────────────────────────────────────────────
+  // ── GPS watchPosition ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!navigator.geolocation) return
 
@@ -190,8 +259,7 @@ export default function TrackingPage() {
           )
           setRouteCoords(coords)
           routeCoordsRef.current = coords
-          const remaining = calcRemainingDistance(curr, coords)
-          setRemainingDist(remaining)
+          setRemainingDist(calcRemainingDistance(curr, coords))
         }
       } catch (e) {
         console.error("Re-routing failed:", e)
@@ -207,12 +275,16 @@ export default function TrackingPage() {
     const handleSuccess = (pos: GeolocationPosition) => {
       const curr: [number, number] = [pos.coords.latitude, pos.coords.longitude]
       setCurrentLocation(curr)
+      setAccuracy(Math.round(pos.coords.accuracy))
+
+      // When paused, update map position only
+      if (!isRecordingRef.current) return
 
       const d = destRef.current
       if (!d) return
       const route = routeCoordsRef.current
 
-      // ── Speed ──────────────────────────────────────────────────────────────
+      // Speed
       const now = Date.now()
       let speedKmh = 0
       if (prevPosRef.current && now - prevPosRef.current.time > 0) {
@@ -227,13 +299,13 @@ export default function TrackingPage() {
       const status: MovingStatus = speedKmh < 0.5 ? "STOPPED" : "MOVING"
       setMovingStatus(status)
 
-      // ── Distance & ETA ─────────────────────────────────────────────────────
+      // Distance & ETA
       const remaining = calcRemainingDistance(curr, route)
       setRemainingDist(remaining)
       const effectiveSpeed = speedKmh < 0.5 ? 4 : speedKmh
       setEta(((remaining / 1000) / effectiveSpeed) * 60)
 
-      // ── Delivery status ────────────────────────────────────────────────────
+      // Delivery status
       const distToDest = haversineDistance(curr[0], curr[1], d.lat, d.lng)
       if (distToDest <= 50) {
         setDeliveryStatus("Arrived")
@@ -245,10 +317,9 @@ export default function TrackingPage() {
         setDeliveryStatus("Preparing")
       }
 
-      // ── Route deviation ────────────────────────────────────────────────────
+      // Route deviation
       if (!isRerouting && Date.now() > rerouteCooldownUntil && route.length > 0) {
-        const nearestDist = distToNearestRoutePoint(curr, route)
-        if (nearestDist > 50) {
+        if (distToNearestRoutePoint(curr, route) > 50) {
           handleDeviation(curr)
         }
       }
@@ -259,94 +330,262 @@ export default function TrackingPage() {
       (err) => console.error("GPS error:", err),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
-
     return () => navigator.geolocation.clearWatch(watchId)
-  }, []) // empty deps — reads mutable values via refs
+  }, [])
 
-  // ── Badge helpers ──────────────────────────────────────────────────────────
-  const deliveryBadgeStyle: Record<DeliveryStatus, { bg: string; text: string }> = {
-    Preparing:   { bg: "bg-gray-400",   text: "text-white" },
-    "En Route":  { bg: "bg-blue-500",   text: "text-white" },
-    Approaching: { bg: "bg-orange-500", text: "text-white" },
-    Arrived:     { bg: "bg-green-500",  text: "text-white" },
-  }
-  const movingBadgeStyle: Record<MovingStatus, { bg: string; text: string }> = {
-    STOPPED: { bg: "bg-gray-400",  text: "text-white" },
-    MOVING:  { bg: "bg-green-500", text: "text-white" },
-  }
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const destTuple: [number, number] = dest ? [dest.lat, dest.lng] : [28.6139, 77.209]
+  const progressPercent = DELIVERY_PROGRESS[deliveryStatus]
 
-  const destTuple: [number, number] = dest
-    ? [dest.lat, dest.lng]
-    : [28.6139, 77.209]
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: BG_MAIN, color: "#ffffff", fontFamily: "sans-serif" }}>
 
-      {/* ── Status bar ──────────────────────────────────────────────────────── */}
-      <div className="px-4 py-2 bg-card border-b border-border shrink-0 flex items-center gap-2">
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-bold ${deliveryBadgeStyle[deliveryStatus].bg} ${deliveryBadgeStyle[deliveryStatus].text}`}
-        >
-          {deliveryStatus}
-        </span>
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-bold ${movingBadgeStyle[movingStatus].bg} ${movingBadgeStyle[movingStatus].text}`}
-        >
-          {movingStatus}
-        </span>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div style={{ backgroundColor: BG_CARD, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <span style={{ fontWeight: "bold", fontSize: "16px" }}>Live Tracking</span>
+
+        {/* Language toggle */}
+        <div style={{ display: "flex", gap: "4px" }}>
+          {(["en", "hi"] as Language[]).map((lang) => (
+            <button
+              key={lang}
+              onClick={() => setLanguage(lang)}
+              style={{
+                padding: "3px 10px",
+                borderRadius: "14px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                backgroundColor: language === lang ? ORANGE : GRAY_BAR,
+                color: "#fff",
+              }}
+            >
+              {lang === "en" ? "EN" : "हिंदी"}
+            </button>
+          ))}
+        </div>
+
+        {/* REC indicator */}
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <span style={{ color: "red", fontSize: "10px", animation: "pulse 1s infinite" }}>🔴</span>
+          <span style={{ fontSize: "11px", fontWeight: "bold" }}>REC</span>
+        </div>
       </div>
 
-      {/* ── Map ─────────────────────────────────────────────────────────────── */}
-      <div className="relative shrink-0" style={{ height: "55vh" }}>
+      {/* ── Map type tabs ──────────────────────────────────────────────────── */}
+      <div style={{ backgroundColor: BG_CARD, display: "flex", borderBottom: `1px solid ${GRAY_BAR}`, flexShrink: 0 }}>
+        {(["street", "satellite"] as MapType[]).map((type) => (
+          <button
+            key={type}
+            onClick={() => setMapType(type)}
+            style={{
+              flex: 1,
+              padding: "8px",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: "bold",
+              cursor: "pointer",
+              backgroundColor: mapType === type ? ORANGE : "transparent",
+              color: mapType === type ? "#fff" : GRAY_SUB,
+              borderBottom: mapType === type ? `2px solid ${ORANGE}` : "2px solid transparent",
+            }}
+          >
+            {type === "street" ? "地図" : "航空写真"}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Map ────────────────────────────────────────────────────────────── */}
+      <div style={{ position: "relative", height: "45vh", flexShrink: 0 }}>
         <TrackingMap
           currentLocation={currentLocation}
           destination={destTuple}
           routeCoordinates={routeCoords}
+          mapType={mapType}
+          accuracy={accuracy}
+          forceCenterTrigger={forceCenterTrigger}
         />
+
+        {/* Live Position button */}
+        <button
+          onClick={() => setForceCenterTrigger((t) => t + 1)}
+          style={{
+            position: "absolute",
+            top: "10px",
+            right: "10px",
+            zIndex: 1000,
+            backgroundColor: BG_CARD,
+            color: "#fff",
+            padding: "6px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "bold",
+            border: `1px solid ${GRAY_BAR}`,
+            cursor: "pointer",
+          }}
+        >
+          📍 Live Position
+        </button>
 
         {/* Deviation popup */}
         {showDeviation && (
-          <div className="absolute inset-0 flex items-center justify-center z-[9999] pointer-events-none">
-            <div className="bg-white dark:bg-gray-800 border border-orange-400 rounded-2xl shadow-xl px-6 py-4 text-center max-w-[260px]">
-              <p className="text-2xl mb-1">⚠️</p>
-              <p className="text-sm font-bold text-foreground leading-snug">
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, pointerEvents: "none" }}>
+            <div style={{ backgroundColor: BG_CARD, border: `2px solid ${ORANGE}`, borderRadius: "16px", padding: "20px 24px", textAlign: "center", maxWidth: "240px", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+              <div style={{ fontSize: "28px", marginBottom: "8px" }}>⚠️</div>
+              <div style={{ fontSize: "14px", fontWeight: "bold", lineHeight: 1.5 }}>
                 Route Deviation<br />Detected.<br />Recalculating...
-              </p>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Info panel ──────────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 bg-card border-t border-border shrink-0 space-y-1">
-        <p className="text-sm font-medium text-foreground">
-          📍 Distance&nbsp;&nbsp;: {formatDistance(remainingDist)}
-        </p>
-        <p className="text-sm font-medium text-foreground">
-          ⏱&nbsp;&nbsp;ETA&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: {formatEta(eta)}
-        </p>
-        <p className="text-sm font-medium text-foreground">
-          🚗 Speed&nbsp;&nbsp;&nbsp;&nbsp;: {speed.toFixed(1)} km/h
-        </p>
+      {/* ── Info cards: DISTANCE / ETA ─────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", padding: "12px 16px 0", flexShrink: 0 }}>
+        <div style={{ backgroundColor: BG_CARD, borderRadius: "12px", padding: "14px", textAlign: "center" }}>
+          <div style={{ fontSize: "10px", color: GRAY_SUB, fontWeight: "bold", letterSpacing: "1px" }}>📍 DISTANCE</div>
+          <div style={{ fontSize: "22px", fontWeight: "bold", marginTop: "6px" }}>{formatDistance(remainingDist)}</div>
+        </div>
+        <div style={{ backgroundColor: BG_CARD, borderRadius: "12px", padding: "14px", textAlign: "center" }}>
+          <div style={{ fontSize: "10px", color: GRAY_SUB, fontWeight: "bold", letterSpacing: "1px" }}>🕐 ETA</div>
+          <div style={{ fontSize: "22px", fontWeight: "bold", marginTop: "6px" }}>{formatEta(eta)}</div>
+        </div>
       </div>
 
-      {/* ── Complete Delivery ────────────────────────────────────────────────── */}
-      <div className="p-4 bg-card shrink-0">
-        <Button
-          onClick={() => router.push("/arrival")}
-          className="w-full h-14 text-base font-bold rounded-xl text-white"
-          style={{ backgroundColor: "#F97316" }}
+      {/* ── Stats row: MOVING / STOPPED / SPEED ───────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", padding: "8px 16px 0", flexShrink: 0 }}>
+        <div style={{ backgroundColor: BG_CARD, borderRadius: "10px", padding: "10px 6px", textAlign: "center" }}>
+          <div style={{ fontSize: "9px", color: GRAY_SUB, letterSpacing: "0.5px", fontWeight: "bold" }}>✈ MOVING</div>
+          <div style={{ fontSize: "15px", fontWeight: "bold", marginTop: "4px", color: movingStatus === "MOVING" ? "#22c55e" : "#fff" }}>
+            {movingDisplay}
+          </div>
+        </div>
+        <div style={{ backgroundColor: BG_CARD, borderRadius: "10px", padding: "10px 6px", textAlign: "center" }}>
+          <div style={{ fontSize: "9px", color: GRAY_SUB, letterSpacing: "0.5px", fontWeight: "bold" }}>⏹ STOPPED</div>
+          <div style={{ fontSize: "15px", fontWeight: "bold", marginTop: "4px", color: movingStatus === "STOPPED" ? "#f59e0b" : "#fff" }}>
+            {stoppedDisplay}
+          </div>
+        </div>
+        <div style={{ backgroundColor: BG_CARD, borderRadius: "10px", padding: "10px 6px", textAlign: "center" }}>
+          <div style={{ fontSize: "9px", color: GRAY_SUB, letterSpacing: "0.5px", fontWeight: "bold" }}>📶 SPEED</div>
+          <div style={{ fontSize: "15px", fontWeight: "bold", marginTop: "4px" }}>{speed.toFixed(0)} km/h</div>
+        </div>
+      </div>
+
+      {/* ── GPS Recording bar ─────────────────────────────────────────────── */}
+      <div style={{ margin: "8px 16px 0", backgroundColor: BG_CARD, borderRadius: "10px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ color: isRecording ? ORANGE : GRAY_SUB, fontSize: "14px" }}>●</span>
+          <span style={{ fontSize: "12px", fontWeight: "bold", color: isRecording ? "#fff" : GRAY_SUB }}>
+            {isRecording ? "GPS RECORDING ACTIVE" : "GPS RECORDING PAUSED"}
+          </span>
+        </div>
+        <button
+          onClick={() => setIsRecording((r) => !r)}
+          style={{
+            backgroundColor: isRecording ? GRAY_BAR : ORANGE,
+            color: "#fff",
+            border: "none",
+            borderRadius: "6px",
+            padding: "4px 12px",
+            fontSize: "12px",
+            fontWeight: "bold",
+            cursor: "pointer",
+          }}
         >
-          Complete Delivery
-        </Button>
+          {isRecording ? "Pause" : "Resume"}
+        </button>
       </div>
 
-      {/* ── Arrived overlay ─────────────────────────────────────────────────── */}
+      {/* ── Delivery Status ───────────────────────────────────────────────── */}
+      <div style={{ margin: "8px 16px 0", backgroundColor: BG_CARD, borderRadius: "12px", padding: "14px", flexShrink: 0 }}>
+        {/* Title + badge */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+          <span style={{ fontSize: "11px", fontWeight: "bold", color: GRAY_SUB, letterSpacing: "1px" }}>DELIVERY STATUS</span>
+          <span style={{
+            backgroundColor: DELIVERY_BADGE_COLOR[deliveryStatus],
+            color: "#fff",
+            padding: "3px 12px",
+            borderRadius: "20px",
+            fontSize: "12px",
+            fontWeight: "bold",
+          }}>
+            {deliveryStatus}
+          </span>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ height: "4px", backgroundColor: GRAY_BAR, borderRadius: "2px", position: "relative", marginBottom: "6px" }}>
+          <div style={{
+            height: "100%",
+            width: `${progressPercent}%`,
+            backgroundColor: ORANGE,
+            borderRadius: "2px",
+            transition: "width 0.5s ease",
+            position: "relative",
+          }}>
+            {progressPercent > 0 && progressPercent < 100 && (
+              <div style={{
+                position: "absolute",
+                right: "-6px",
+                top: "-4px",
+                width: "12px",
+                height: "12px",
+                backgroundColor: ORANGE,
+                borderRadius: "50%",
+                border: `2px solid ${BG_CARD}`,
+              }} />
+            )}
+          </div>
+        </div>
+
+        {/* Labels */}
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: GRAY_SUB, marginBottom: "8px" }}>
+          <span>Start</span>
+          <span>Near</span>
+          <span>Arrived</span>
+        </div>
+
+        <div style={{ fontSize: "11px", color: GRAY_SUB }}>
+          ● Auto-detecting arrival (30m)...
+        </div>
+      </div>
+
+      {/* ── I'm at the destination ────────────────────────────────────────── */}
+      <div style={{ padding: "10px 16px 4px", flexShrink: 0 }}>
+        <button
+          onClick={() => router.push("/arrival")}
+          style={{
+            width: "100%",
+            height: "52px",
+            backgroundColor: ORANGE,
+            color: "#fff",
+            border: "none",
+            borderRadius: "12px",
+            fontSize: "15px",
+            fontWeight: "bold",
+            cursor: "pointer",
+          }}
+        >
+          I&apos;m at the destination
+        </button>
+      </div>
+
+      {/* ── Footer note ───────────────────────────────────────────────────── */}
+      <div style={{ padding: "4px 16px 16px", textAlign: "center", flexShrink: 0 }}>
+        <span style={{ fontSize: "11px", color: GRAY_SUB }}>
+          ※ Use only when GPS cannot detect arrival
+        </span>
+      </div>
+
+      {/* ── Arrived overlay ───────────────────────────────────────────────── */}
       {showArrived && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[99999]">
-          <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl px-8 py-8 text-center">
-            <p className="text-5xl mb-3">🎉</p>
-            <p className="text-xl font-bold text-foreground">Arrived at Destination!</p>
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999 }}>
+          <div style={{ backgroundColor: BG_CARD, borderRadius: "24px", padding: "40px 48px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.8)" }}>
+            <div style={{ fontSize: "56px", marginBottom: "12px" }}>🎉</div>
+            <div style={{ fontSize: "20px", fontWeight: "bold" }}>Arrived at Destination!</div>
           </div>
         </div>
       )}

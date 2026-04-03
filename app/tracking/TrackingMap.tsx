@@ -1,7 +1,7 @@
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet"
-import { useEffect } from "react"
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from "react-leaflet"
+import { useEffect, useRef } from "react"
 
 // Fix default icon paths (Next.js bundler drops the URL resolver)
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -33,6 +33,7 @@ const orangeIcon = new L.DivIcon({
   className: "",
 })
 
+// Auto-follow current location
 function MapCenterUpdater({ center }: { center: [number, number] }) {
   const map = useMap()
   useEffect(() => {
@@ -41,16 +42,41 @@ function MapCenterUpdater({ center }: { center: [number, number] }) {
   return null
 }
 
+// Force-center on button click (trigger increments)
+function ForceCenterUpdater({
+  center,
+  trigger,
+}: {
+  center: [number, number]
+  trigger: number
+}) {
+  const map = useMap()
+  const prevRef = useRef(trigger)
+  useEffect(() => {
+    if (trigger !== prevRef.current) {
+      prevRef.current = trigger
+      map.setView(center, map.getZoom(), { animate: true })
+    }
+  }, [trigger, center, map])
+  return null
+}
+
 export interface TrackingMapProps {
   currentLocation: [number, number] | null
   destination: [number, number]
   routeCoordinates: [number, number][]
+  mapType: "street" | "satellite"
+  accuracy?: number
+  forceCenterTrigger?: number
 }
 
 export default function TrackingMap({
   currentLocation,
   destination,
   routeCoordinates,
+  mapType,
+  accuracy,
+  forceCenterTrigger = 0,
 }: TrackingMapProps) {
   const center = currentLocation ?? destination
 
@@ -61,17 +87,43 @@ export default function TrackingMap({
       style={{ width: "100%", height: "100%" }}
       zoomControl
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      {mapType === "street" ? (
+        <TileLayer
+          key="street"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+      ) : (
+        <TileLayer
+          key="satellite"
+          attribution="Tiles &copy; Esri"
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        />
+      )}
 
-      {/* Follow current location */}
+      {/* Auto-follow current location */}
       {currentLocation && <MapCenterUpdater center={currentLocation} />}
 
-      {/* Current location — blue */}
+      {/* Force-center on Live Position button click */}
       {currentLocation && (
-        <Marker position={currentLocation} icon={blueIcon} />
+        <ForceCenterUpdater center={currentLocation} trigger={forceCenterTrigger} />
+      )}
+
+      {/* Current location — blue, with popup */}
+      {currentLocation && (
+        <Marker position={currentLocation} icon={blueIcon}>
+          <Popup>
+            <div style={{ fontSize: "13px", lineHeight: 1.6, minWidth: "160px" }}>
+              <strong>Current Location</strong>
+              <br />
+              Lat: {currentLocation[0].toFixed(6)}
+              <br />
+              Lng: {currentLocation[1].toFixed(6)}
+              <br />
+              Accuracy: {accuracy != null ? `${accuracy} m` : "—"}
+            </div>
+          </Popup>
+        </Marker>
       )}
 
       {/* Destination — orange */}
