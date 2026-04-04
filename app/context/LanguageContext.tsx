@@ -178,6 +178,14 @@ const translations: Record<Lang, Record<string, string>> = {
     shipperNotifiedConfirm: 'शिपर को सूचित किया गया',
     deliveryReportSent: 'शिपर को रिपोर्ट भेजी गई! शाबाश! 🎉',
 
+    // === earnings / photo ===
+    earningsLabel: 'इस डिलीवरी की कमाई',
+    deliveryPhoto: 'डिलीवरी की फ़ोटो',
+    takePhoto: 'फ़ोटो लें',
+    retake: 'दोबारा लें',
+    uploading: 'अपलोड हो रहा है...',
+    photoRequired: 'कृपया फ़ोटो लें',
+
     // === エラー・共通メッセージ ===
     loading: 'लोड हो रहा है...',
     error: 'त्रुटि',
@@ -354,6 +362,14 @@ const translations: Record<Lang, Record<string, string>> = {
     notifyShipper: 'Notify shipper',
     shipperNotifiedConfirm: 'Shipper notified',
     deliveryReportSent: 'Delivery report sent to shipper! Great work! 🎉',
+
+    // === earnings / photo ===
+    earningsLabel: 'Earnings for this delivery',
+    deliveryPhoto: 'Delivery Photo',
+    takePhoto: 'Take Photo',
+    retake: 'Retake',
+    uploading: 'Uploading...',
+    photoRequired: 'Please take a photo',
 
     // === エラー・共通メッセージ ===
     loading: 'Loading...',

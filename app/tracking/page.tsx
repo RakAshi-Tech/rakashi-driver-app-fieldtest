@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
+import { DeliveryPhotoCapture } from "@/app/components/DeliveryPhotoCapture"
 import type { TrackingMapProps } from "./TrackingMap"
 import { supabase } from "@/lib/supabase"
 
@@ -96,35 +97,7 @@ function formatMmSs(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
-// ── Supabase helpers (module-level, no component state) ───────────────────────
-
-async function dbStartDelivery(destLat: number | null): Promise<string | null> {
-  try {
-    const driverId = localStorage.getItem("driverId") || "demo"
-    const jobId    = localStorage.getItem("jobId")    || "mock-123"
-    const now      = new Date().toISOString()
-
-    const { data, error } = await supabase
-      .from("gps_delivery_summary")
-      .insert({
-        driver_id:  driverId,
-        job_id:     jobId,
-        started_at: now,
-        start_lat:  destLat ?? null,
-      })
-      .select()
-      .single()
-
-    if (error) { console.error("startDelivery error:", error); return null }
-    if (data?.id) {
-      localStorage.setItem("currentDeliveryId", data.id)
-      return data.id as string
-    }
-  } catch (e) {
-    console.error("startDelivery exception:", e)
-  }
-  return null
-}
+// ── Supabase helper (module-level, no component state) ────────────────────────
 
 async function dbRecordTrackPoint(
   deliveryId: string,
@@ -168,79 +141,18 @@ async function calcTrustScore(driverId: string): Promise<number> {
     const onTimeCount = deliveries?.filter((d: { on_time: boolean }) => d.on_time).length ?? 0
     const onTimeRate = total > 0 ? onTimeCount / total : 1.0
 
-    // 配送件数ボーナス（上限60点）— 対数スケール
-    // 500件≈18点, 2000件≈30点, 6000件≈50点
     const deliveryBonus = total === 0
       ? 0
       : Math.min(Math.floor(Math.log10(total + 1) * 17), 60)
-
-    // 時間厳守ボーナス（最大25点）
     const onTimeBonus = Math.floor(onTimeRate * 25)
-
-    // 長期継続ボーナス（最大15点）— 1000件ごとに1点
     const continuityBonus = Math.min(Math.floor(total / 1000), 15)
-
-    // 合計（初期値10 + 各ボーナス、上限100）
     const newScore = Math.min(10 + deliveryBonus + onTimeBonus + continuityBonus, 100)
 
-    // スコアは下がらない（与信記録として保護）
     return Math.max(newScore, currentScore)
   } catch (err) {
     console.error("calcTrustScore error:", err)
     return currentScore
   }
-}
-
-async function dbCompleteDelivery(
-  deliveryId: string,
-  startedAt: string,
-  totalTraveledMeters: number
-): Promise<void> {
-  try {
-    const now         = new Date()
-    const durationMin = Math.round(
-      (now.getTime() - new Date(startedAt).getTime()) / 60000
-    )
-    const totalDistKm = parseFloat((totalTraveledMeters / 1000).toFixed(2))
-    const onTime      = durationMin <= 60
-
-    await supabase
-      .from("gps_delivery_summary")
-      .update({
-        completed_at:       now.toISOString(),
-        total_distance_km:  totalDistKm,
-        total_duration_min: durationMin,
-        on_time:            onTime,
-      })
-      .eq("id", deliveryId)
-  } catch (e) {
-    console.error("completeDelivery error:", e)
-  }
-
-  // Update driver total_deliveries + recalculate trust_score
-  try {
-    const driverId = localStorage.getItem("driverId") || "demo"
-    const { data: profile } = await supabase
-      .from("driver_profiles")
-      .select("total_deliveries")
-      .eq("id", driverId)
-      .single()
-
-    if (profile) {
-      const newScore = await calcTrustScore(driverId)
-      await supabase
-        .from("driver_profiles")
-        .update({
-          total_deliveries: (profile.total_deliveries || 0) + 1,
-          trust_score:      newScore,
-        })
-        .eq("id", driverId)
-    }
-  } catch (e) {
-    console.error("updateDriverProfile error:", e)
-  }
-
-  localStorage.removeItem("currentDeliveryId")
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -289,6 +201,9 @@ export default function TrackingPage() {
   const [showDeviation, setShowDeviation]   = useState(false)
   const [showArrived, setShowArrived]       = useState(false)
 
+  // ── Earnings state ─────────────────────────────────────────────────────────
+  const [earnings, setEarnings] = useState<number>(0)
+
   // ── Timer state ────────────────────────────────────────────────────────────
   const [movingDisplay,  setMovingDisplay]  = useState("00:00")
   const [stoppedDisplay, setStoppedDisplay] = useState("00:00")
@@ -309,8 +224,9 @@ export default function TrackingPage() {
   // ── Refs (Supabase) ────────────────────────────────────────────────────────
   const deliveryIdRef       = useRef<string | null>(null)
   const startedAtRef        = useRef<string>(new Date().toISOString())
+  const shiftStartRef       = useRef<string>(new Date().toISOString())
   const lastRecordedRef     = useRef<number>(0)
-  const totalTraveledRef    = useRef<number>(0)   // meters accumulated via GPS
+  const totalTraveledRef    = useRef<number>(0)
 
   // Keep refs in sync
   useEffect(() => { destRef.current        = dest        }, [dest])
@@ -318,6 +234,164 @@ export default function TrackingPage() {
   useEffect(() => { isRecordingRef.current = isRecording }, [isRecording])
   useEffect(() => { movingStatusRef.current = movingStatus }, [movingStatus])
   useEffect(() => { langRef.current = lang }, [lang])
+
+  // ── Supabase: Start shift ──────────────────────────────────────────────────
+  const dbStartShift = async () => {
+    try {
+      const driverId = localStorage.getItem('driverId') || 'demo'
+      const today = new Date().toISOString().split('T')[0]
+
+      const { data: existingShift } = await supabase
+        .from('driver_shifts')
+        .select('id')
+        .eq('driver_id', driverId)
+        .eq('shift_date', today)
+        .single()
+
+      if (!existingShift) {
+        await supabase
+          .from('driver_shifts')
+          .insert({
+            driver_id: driverId,
+            shift_date: today,
+            start_time: new Date().toISOString(),
+            total_deliveries: 0,
+            total_earnings_inr: 0,
+            total_distance_km: 0,
+          })
+      }
+    } catch (err) {
+      console.error('dbStartShift error:', err)
+    }
+  }
+
+  // ── Supabase: Start delivery ───────────────────────────────────────────────
+  const dbStartDelivery = async (destLat: number, destLng: number) => {
+    try {
+      const routeData = localStorage.getItem('route')
+      const routeCoordinates = routeData
+        ? JSON.parse(routeData).coordinates
+        : null
+
+      const today = new Date().toISOString().split('T')[0]
+
+      const { data, error } = await supabase
+        .from('gps_delivery_summary')
+        .insert({
+          driver_id: localStorage.getItem('driverId') || 'demo',
+          job_id: localStorage.getItem('jobId') || 'mock-123',
+          started_at: new Date().toISOString(),
+          start_lat: destLat,
+          route_coordinates: routeCoordinates,
+          shift_date: today,
+        })
+        .select()
+        .single()
+
+      if (error) { console.error('dbStartDelivery error:', error); return }
+
+      if (data) {
+        localStorage.setItem('currentDeliveryId', data.id)
+        deliveryIdRef.current = data.id
+        startedAtRef.current = data.started_at
+      }
+    } catch (err) {
+      console.error('dbStartDelivery error:', err)
+    }
+  }
+
+  // ── Supabase: Complete delivery ────────────────────────────────────────────
+  const dbCompleteDelivery = async (
+    deliveryId: string,
+    startedAt: string,
+    totalMeters: number,
+    earningsInr: number
+  ) => {
+    try {
+      const now = new Date()
+      const durationMin = Math.round(
+        (now.getTime() - new Date(startedAt).getTime()) / 60000
+      )
+      const driverId = localStorage.getItem('driverId') || 'demo'
+      const today = now.toISOString().split('T')[0]
+
+      // 1. 配送サマリーを完了更新
+      await supabase
+        .from('gps_delivery_summary')
+        .update({
+          completed_at: now.toISOString(),
+          total_distance_km: parseFloat((totalMeters / 1000).toFixed(2)),
+          total_duration_min: durationMin,
+          on_time: durationMin <= 60,
+          earnings_inr: earningsInr,
+          photo_url: localStorage.getItem('deliveryPhotoUrl') || null,
+        })
+        .eq('id', deliveryId)
+
+      // 2. driver_shiftsを更新
+      const { data: existingShift } = await supabase
+        .from('driver_shifts')
+        .select('*')
+        .eq('driver_id', driverId)
+        .eq('shift_date', today)
+        .single()
+
+      if (existingShift) {
+        await supabase
+          .from('driver_shifts')
+          .update({
+            total_deliveries: existingShift.total_deliveries + 1,
+            total_earnings_inr: existingShift.total_earnings_inr + earningsInr,
+            total_distance_km: existingShift.total_distance_km + (totalMeters / 1000),
+            end_time: now.toISOString(),
+          })
+          .eq('id', existingShift.id)
+      } else {
+        await supabase
+          .from('driver_shifts')
+          .insert({
+            driver_id: driverId,
+            shift_date: today,
+            start_time: new Date(startedAt).toISOString(),
+            end_time: now.toISOString(),
+            total_deliveries: 1,
+            total_earnings_inr: earningsInr,
+            total_distance_km: totalMeters / 1000,
+          })
+      }
+
+      // 3. driver_profilesのtotal_deliveriesと収益を更新
+      const { data: profile } = await supabase
+        .from('driver_profiles')
+        .select('total_deliveries, trust_score, total_earnings_inr')
+        .eq('id', driverId)
+        .single()
+
+      if (profile) {
+        const newTrustScore = await calcTrustScore(driverId)
+        await supabase
+          .from('driver_profiles')
+          .update({
+            total_deliveries: (profile.total_deliveries || 0) + 1,
+            trust_score: newTrustScore ?? profile.trust_score,
+            total_earnings_inr: (profile.total_earnings_inr || 0) + earningsInr,
+          })
+          .eq('id', driverId)
+      }
+
+      // 4. localStorageをクリア
+      localStorage.removeItem('currentDeliveryId')
+      localStorage.removeItem('destination')
+      localStorage.removeItem('route')
+      localStorage.removeItem('deliveryPhotoUrl')
+
+      router.push('/dashboard')
+
+    } catch (err) {
+      console.error('dbCompleteDelivery error:', err)
+      router.push('/dashboard')
+    }
+  }
 
   // ── Timer ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -354,18 +428,24 @@ export default function TrackingPage() {
     }
   }, [])
 
+  // ── STEP 1: Start shift record ─────────────────────────────────────────────
+  useEffect(() => {
+    dbStartShift()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── STEP 2: Start delivery record in Supabase ──────────────────────────────
   useEffect(() => {
     const start = async () => {
       const destRaw = localStorage.getItem("destination")
-      const destLat = destRaw ? (JSON.parse(destRaw) as Destination).lat : null
-      const now = new Date().toISOString()
-      startedAtRef.current = now
-
-      const id = await dbStartDelivery(destLat)
-      if (id) deliveryIdRef.current = id
+      const parsedDest = destRaw ? (JSON.parse(destRaw) as Destination) : null
+      const destLat = parsedDest?.lat ?? 0
+      const destLng = parsedDest?.lng ?? 0
+      shiftStartRef.current = new Date().toISOString()
+      await dbStartDelivery(destLat, destLng)
     }
     start()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── OSRM fallback ──────────────────────────────────────────────────────────
@@ -452,7 +532,6 @@ export default function TrackingPage() {
       setCurrentLocation(curr)
       setAccuracy(Math.round(pos.coords.accuracy))
 
-      // ── STEP 3: Accumulate traveled distance (before prevPosRef update) ────
       if (prevPosRef.current) {
         const stepM = haversineDistance(
           prevPosRef.current.pos[0], prevPosRef.current.pos[1],
@@ -461,7 +540,6 @@ export default function TrackingPage() {
         totalTraveledRef.current += stepM
       }
 
-      // ── STEP 3: Record track point — throttled to 30s ─────────────────────
       const tsNow = Date.now()
       if (tsNow - lastRecordedRef.current > 30000 && deliveryIdRef.current) {
         lastRecordedRef.current = tsNow
@@ -521,15 +599,16 @@ export default function TrackingPage() {
 
   // ── STEP 4: Complete delivery on "I'm at the destination" ─────────────────
   const handleAtDestination = () => {
-    // Fire-and-forget: don't block navigation on Supabase write
     if (deliveryIdRef.current) {
       dbCompleteDelivery(
         deliveryIdRef.current,
         startedAtRef.current,
-        totalTraveledRef.current
-      ).catch((e) => console.error("completeDelivery failed:", e))
+        totalTraveledRef.current,
+        earnings
+      )
+    } else {
+      router.push('/dashboard')
     }
-    router.push("/arrival")
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -696,6 +775,47 @@ export default function TrackingPage() {
         <div style={{ fontSize: "11px", color: GRAY_SUB }}>
           {t('autoDetecting')}
         </div>
+      </div>
+
+      {/* ── Delivery Photo ─────────────────────────────────────────────────── */}
+      {deliveryIdRef.current && (
+        <DeliveryPhotoCapture
+          deliveryId={deliveryIdRef.current}
+          onPhotoSaved={(url) => {
+            localStorage.setItem('deliveryPhotoUrl', url)
+          }}
+        />
+      )}
+
+      {/* ── Earnings input ─────────────────────────────────────────────────── */}
+      <div style={{
+        padding: '12px 16px',
+        background: '#1a1a2e',
+        borderTop: '1px solid #374151',
+      }}>
+        <label style={{
+          fontSize: '12px',
+          color: '#9ca3af',
+          display: 'block',
+          marginBottom: '6px'
+        }}>
+          {t('earningsLabel')} (₹)
+        </label>
+        <input
+          type="number"
+          value={earnings}
+          onChange={(e) => setEarnings(Number(e.target.value))}
+          placeholder="0"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            background: '#0f0f1a',
+            border: '1px solid #374151',
+            borderRadius: '8px',
+            color: '#ffffff',
+            fontSize: '16px',
+          }}
+        />
       </div>
 
       {/* ── I'm at the destination ─────────────────────────────────────────── */}
