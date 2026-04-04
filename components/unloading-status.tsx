@@ -74,23 +74,47 @@ export function UnloadingStatus() {
 
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.error('ファイルが選択されていません');
+      return;
+    }
+
+    console.log('アップロード開始:', file.name, file.size);
     setUploading(true);
+
     try {
       const deliveryId = localStorage.getItem('currentDeliveryId');
-      if (!deliveryId) return;
+      console.log('deliveryId:', deliveryId);
+
+      if (!deliveryId) {
+        console.error('currentDeliveryIdがlocalStorageにありません');
+        return;
+      }
+
       const fileName = `${deliveryId}_${Date.now()}.jpg`;
-      const { error } = await supabase.storage
+      console.log('アップロード先:', fileName);
+
+      const { data, error } = await supabase.storage
         .from('delivery-photos')
         .upload(fileName, file, { contentType: 'image/jpeg', upsert: true });
-      if (error) throw error;
+
+      console.log('アップロード結果:', data, error);
+
+      if (error) {
+        console.error('Storageエラー:', error.message, error);
+        throw error;
+      }
+
       const { data: urlData } = supabase.storage
         .from('delivery-photos')
         .getPublicUrl(fileName);
+
+      console.log('公開URL:', urlData.publicUrl);
+
       setPhotoUrl(urlData.publicUrl);
       localStorage.setItem('deliveryPhotoUrl', urlData.publicUrl);
     } catch (err) {
-      console.error('Photo upload error:', err);
+      console.error('写真アップロード失敗:', err);
     } finally {
       setUploading(false);
     }
