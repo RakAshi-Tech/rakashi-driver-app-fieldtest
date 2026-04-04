@@ -179,6 +179,7 @@ const translations: Record<Lang, Record<string, string>> = {
     deliveryReportSent: 'शिपर को रिपोर्ट भेजी गई! शाबाश! 🎉',
 
     // === earnings / photo ===
+    deliveryComplete: 'डिलीवरी पूर्ण',
     earningsLabel: 'इस डिलीवरी की कमाई',
     deliveryPhoto: 'डिलीवरी की फ़ोटो',
     takePhoto: 'फ़ोटो लें',
@@ -364,6 +365,7 @@ const translations: Record<Lang, Record<string, string>> = {
     deliveryReportSent: 'Delivery report sent to shipper! Great work! 🎉',
 
     // === earnings / photo ===
+    deliveryComplete: 'Delivery Complete',
     earningsLabel: 'Earnings for this delivery',
     deliveryPhoto: 'Delivery Photo',
     takePhoto: 'Take Photo',

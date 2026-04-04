@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
-import { DeliveryPhotoCapture } from "@/app/components/DeliveryPhotoCapture"
 import type { TrackingMapProps } from "./TrackingMap"
 import { supabase } from "@/lib/supabase"
 
@@ -201,9 +200,6 @@ export default function TrackingPage() {
   const [showDeviation, setShowDeviation]   = useState(false)
   const [showArrived, setShowArrived]       = useState(false)
 
-  // ── Earnings state ─────────────────────────────────────────────────────────
-  const [earnings, setEarnings] = useState<number>(0)
-
   // ── Timer state ────────────────────────────────────────────────────────────
   const [movingDisplay,  setMovingDisplay]  = useState("00:00")
   const [stoppedDisplay, setStoppedDisplay] = useState("00:00")
@@ -292,104 +288,12 @@ export default function TrackingPage() {
 
       if (data) {
         localStorage.setItem('currentDeliveryId', data.id)
+        localStorage.setItem('deliveryStartedAt', data.started_at)
         deliveryIdRef.current = data.id
         startedAtRef.current = data.started_at
       }
     } catch (err) {
       console.error('dbStartDelivery error:', err)
-    }
-  }
-
-  // ── Supabase: Complete delivery ────────────────────────────────────────────
-  const dbCompleteDelivery = async (
-    deliveryId: string,
-    startedAt: string,
-    totalMeters: number,
-    earningsInr: number
-  ) => {
-    try {
-      const now = new Date()
-      const durationMin = Math.round(
-        (now.getTime() - new Date(startedAt).getTime()) / 60000
-      )
-      const driverId = localStorage.getItem('driverId') || 'demo'
-      const today = now.toISOString().split('T')[0]
-
-      // 1. 配送サマリーを完了更新
-      await supabase
-        .from('gps_delivery_summary')
-        .update({
-          completed_at: now.toISOString(),
-          total_distance_km: parseFloat((totalMeters / 1000).toFixed(2)),
-          total_duration_min: durationMin,
-          on_time: durationMin <= 60,
-          earnings_inr: earningsInr,
-          photo_url: localStorage.getItem('deliveryPhotoUrl') || null,
-        })
-        .eq('id', deliveryId)
-
-      // 2. driver_shiftsを更新
-      const { data: existingShift } = await supabase
-        .from('driver_shifts')
-        .select('*')
-        .eq('driver_id', driverId)
-        .eq('shift_date', today)
-        .single()
-
-      if (existingShift) {
-        await supabase
-          .from('driver_shifts')
-          .update({
-            total_deliveries: existingShift.total_deliveries + 1,
-            total_earnings_inr: existingShift.total_earnings_inr + earningsInr,
-            total_distance_km: existingShift.total_distance_km + (totalMeters / 1000),
-            end_time: now.toISOString(),
-          })
-          .eq('id', existingShift.id)
-      } else {
-        await supabase
-          .from('driver_shifts')
-          .insert({
-            driver_id: driverId,
-            shift_date: today,
-            start_time: new Date(startedAt).toISOString(),
-            end_time: now.toISOString(),
-            total_deliveries: 1,
-            total_earnings_inr: earningsInr,
-            total_distance_km: totalMeters / 1000,
-          })
-      }
-
-      // 3. driver_profilesのtotal_deliveriesと収益を更新
-      const { data: profile } = await supabase
-        .from('driver_profiles')
-        .select('total_deliveries, trust_score, total_earnings_inr')
-        .eq('id', driverId)
-        .single()
-
-      if (profile) {
-        const newTrustScore = await calcTrustScore(driverId)
-        await supabase
-          .from('driver_profiles')
-          .update({
-            total_deliveries: (profile.total_deliveries || 0) + 1,
-            trust_score: newTrustScore ?? profile.trust_score,
-            total_earnings_inr: (profile.total_earnings_inr || 0) + earningsInr,
-          })
-          .eq('id', driverId)
-      }
-
-      // 4. localStorageをクリア
-      localStorage.removeItem('currentDeliveryId')
-      localStorage.removeItem('destination')
-      localStorage.removeItem('route')
-      localStorage.removeItem('deliveryPhotoUrl')
-
-      router.push('/dashboard')
-
-    } catch (err) {
-      console.error('dbCompleteDelivery error:', err)
-      router.push('/dashboard')
     }
   }
 
@@ -597,18 +501,10 @@ export default function TrackingPage() {
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
-  // ── STEP 4: Complete delivery on "I'm at the destination" ─────────────────
+  // ── STEP 4: Navigate to arrival confirmation screen ──────────────────────
   const handleAtDestination = () => {
-    if (deliveryIdRef.current) {
-      dbCompleteDelivery(
-        deliveryIdRef.current,
-        startedAtRef.current,
-        totalTraveledRef.current,
-        earnings
-      )
-    } else {
-      router.push('/dashboard')
-    }
+    localStorage.setItem('totalTraveledMeters', String(totalTraveledRef.current))
+    router.push('/arrival')
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -775,47 +671,6 @@ export default function TrackingPage() {
         <div style={{ fontSize: "11px", color: GRAY_SUB }}>
           {t('autoDetecting')}
         </div>
-      </div>
-
-      {/* ── Delivery Photo ─────────────────────────────────────────────────── */}
-      {deliveryIdRef.current && (
-        <DeliveryPhotoCapture
-          deliveryId={deliveryIdRef.current}
-          onPhotoSaved={(url) => {
-            localStorage.setItem('deliveryPhotoUrl', url)
-          }}
-        />
-      )}
-
-      {/* ── Earnings input ─────────────────────────────────────────────────── */}
-      <div style={{
-        padding: '12px 16px',
-        background: '#1a1a2e',
-        borderTop: '1px solid #374151',
-      }}>
-        <label style={{
-          fontSize: '12px',
-          color: '#9ca3af',
-          display: 'block',
-          marginBottom: '6px'
-        }}>
-          {t('earningsLabel')} (₹)
-        </label>
-        <input
-          type="number"
-          value={earnings}
-          onChange={(e) => setEarnings(Number(e.target.value))}
-          placeholder="0"
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            background: '#0f0f1a',
-            border: '1px solid #374151',
-            borderRadius: '8px',
-            color: '#ffffff',
-            fontSize: '16px',
-          }}
-        />
       </div>
 
       {/* ── I'm at the destination ─────────────────────────────────────────── */}

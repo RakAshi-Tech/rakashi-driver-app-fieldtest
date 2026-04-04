@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useLang } from "@/app/context/LanguageContext";
 import { LangToggle } from "@/app/components/LangToggle";
+import { supabase } from "@/lib/supabase";
 
 type UnloadingState = "waiting" | "in-progress" | "completed";
 
@@ -35,6 +36,10 @@ export function UnloadingStatus() {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [shipperNotified, setShipperNotified] = useState(false);
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [earnings, setEarnings] = useState<number>(0);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -49,10 +54,7 @@ export function UnloadingStatus() {
   useEffect(() => {
     if (state === "completed") {
       setShowCompletionBanner(true);
-      const timer = setTimeout(() => {
-        router.push("/dashboard");
-      }, 3000);
-      return () => clearTimeout(timer);
+      setShowCompleteModal(true);
     }
   }, [state]);
 
@@ -69,6 +71,112 @@ export function UnloadingStatus() {
   const handleNotifyShipper = useCallback(() => {
     setShipperNotified(true);
   }, []);
+
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const deliveryId = localStorage.getItem('currentDeliveryId');
+      if (!deliveryId) return;
+      const fileName = `${deliveryId}_${Date.now()}.jpg`;
+      const { error } = await supabase.storage
+        .from('delivery-photos')
+        .upload(fileName, file, { contentType: 'image/jpeg', upsert: true });
+      if (error) throw error;
+      const { data: urlData } = supabase.storage
+        .from('delivery-photos')
+        .getPublicUrl(fileName);
+      setPhotoUrl(urlData.publicUrl);
+      localStorage.setItem('deliveryPhotoUrl', urlData.publicUrl);
+    } catch (err) {
+      console.error('Photo upload error:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const dbCompleteDelivery = async (
+    deliveryId: string,
+    startedAt: string,
+    totalMeters: number,
+    earningsInr: number
+  ) => {
+    try {
+      const now = new Date();
+      const durationMin = Math.round(
+        (now.getTime() - new Date(startedAt).getTime()) / 60000
+      );
+      const driverId = localStorage.getItem('driverId') || 'demo';
+      const today = now.toISOString().split('T')[0];
+
+      await supabase
+        .from('gps_delivery_summary')
+        .update({
+          completed_at: now.toISOString(),
+          total_distance_km: parseFloat((totalMeters / 1000).toFixed(2)),
+          total_duration_min: durationMin,
+          on_time: durationMin <= 60,
+          earnings_inr: earningsInr,
+          photo_url: localStorage.getItem('deliveryPhotoUrl') || null,
+        })
+        .eq('id', deliveryId);
+
+      const { data: existingShift } = await supabase
+        .from('driver_shifts')
+        .select('*')
+        .eq('driver_id', driverId)
+        .eq('shift_date', today)
+        .single();
+
+      if (existingShift) {
+        await supabase
+          .from('driver_shifts')
+          .update({
+            total_deliveries: existingShift.total_deliveries + 1,
+            total_earnings_inr: existingShift.total_earnings_inr + earningsInr,
+            total_distance_km: existingShift.total_distance_km + totalMeters / 1000,
+            end_time: now.toISOString(),
+          })
+          .eq('id', existingShift.id);
+      } else {
+        await supabase.from('driver_shifts').insert({
+          driver_id: driverId,
+          shift_date: today,
+          start_time: new Date(startedAt).toISOString(),
+          end_time: now.toISOString(),
+          total_deliveries: 1,
+          total_earnings_inr: earningsInr,
+          total_distance_km: totalMeters / 1000,
+        });
+      }
+
+      const { data: profile } = await supabase
+        .from('driver_profiles')
+        .select('total_deliveries, trust_score, total_earnings_inr')
+        .eq('id', driverId)
+        .single();
+
+      if (profile) {
+        await supabase
+          .from('driver_profiles')
+          .update({
+            total_deliveries: (profile.total_deliveries || 0) + 1,
+            total_earnings_inr: (profile.total_earnings_inr || 0) + earningsInr,
+          })
+          .eq('id', driverId);
+      }
+
+      localStorage.removeItem('currentDeliveryId');
+      localStorage.removeItem('deliveryStartedAt');
+      localStorage.removeItem('destination');
+      localStorage.removeItem('route');
+      localStorage.removeItem('deliveryPhotoUrl');
+      localStorage.removeItem('totalTraveledMeters');
+    } catch (err) {
+      console.error('dbCompleteDelivery error:', err);
+    }
+  };
 
   const getStepStatus = (step: number): "completed" | "active" | "pending" => {
     if (state === "completed") return "completed";
@@ -333,6 +441,113 @@ export function UnloadingStatus() {
           </div>
         </div>
 
+      {/* ── 配送完了モーダル ─────────────────────────────────────────────── */}
+      {showCompleteModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }}>
+          <div style={{
+            background: '#1a1a2e',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px',
+          }}>
+            <h2 style={{
+              color: '#ffffff',
+              fontSize: '18px',
+              marginBottom: '20px',
+              textAlign: 'center',
+              margin: '0 0 20px 0',
+            }}>
+              🎉 {t('deliveryComplete')}
+            </h2>
+
+            {/* 写真撮影エリア */}
+            <p style={{ color: '#9ca3af', fontSize: '12px', marginBottom: '8px' }}>
+              📷 {t('deliveryPhoto')}
+            </p>
+
+            {photoUrl ? (
+              <div style={{ position: 'relative', marginBottom: '16px' }}>
+                <img
+                  src={photoUrl}
+                  alt="delivery"
+                  style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '8px' }}
+                />
+                <button
+                  onClick={() => { setPhotoUrl(null); localStorage.removeItem('deliveryPhotoUrl'); }}
+                  style={{
+                    position: 'absolute', top: '8px', right: '8px',
+                    background: '#dc2626', color: '#fff', border: 'none',
+                    borderRadius: '4px', padding: '4px 8px', fontSize: '12px', cursor: 'pointer',
+                  }}
+                >
+                  {t('retake')}
+                </button>
+              </div>
+            ) : (
+              <label style={{
+                display: 'block', width: '100%', padding: '16px',
+                background: '#0f0f1a', border: '1px dashed #4b5563', borderRadius: '8px',
+                color: uploading ? '#6b7280' : '#9ca3af', fontSize: '14px',
+                textAlign: 'center', cursor: 'pointer', marginBottom: '16px',
+                boxSizing: 'border-box',
+              }}>
+                {uploading ? t('uploading') : `📷 ${t('takePhoto')}`}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handlePhotoCapture}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            )}
+
+            {/* 収益入力 */}
+            <p style={{ color: '#9ca3af', fontSize: '12px', marginBottom: '8px' }}>
+              💰 {t('earningsLabel')} (₹)
+            </p>
+            <input
+              type="number"
+              value={earnings}
+              onChange={(e) => setEarnings(Number(e.target.value))}
+              placeholder="0"
+              style={{
+                width: '100%', padding: '12px', background: '#0f0f1a',
+                border: '1px solid #374151', borderRadius: '8px',
+                color: '#ffffff', fontSize: '16px', marginBottom: '20px',
+                boxSizing: 'border-box',
+              }}
+            />
+
+            {/* 完了ボタン */}
+            <button
+              onClick={async () => {
+                const deliveryId = localStorage.getItem('currentDeliveryId') || '';
+                const startedAt = localStorage.getItem('deliveryStartedAt') || '';
+                const totalMeters = parseFloat(localStorage.getItem('totalTraveledMeters') || '0');
+                await dbCompleteDelivery(deliveryId, startedAt, totalMeters, earnings);
+                router.push('/dashboard');
+              }}
+              style={{
+                width: '100%', padding: '16px', background: '#f97316',
+                border: 'none', borderRadius: '12px', color: '#ffffff',
+                fontSize: '16px', fontWeight: 'bold', cursor: 'pointer',
+              }}
+            >
+              ✓ {t('completeDelivery')}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
