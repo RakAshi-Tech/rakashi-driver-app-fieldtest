@@ -1,36 +1,77 @@
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js')
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js')
+// Web Push Service Worker (VAPID方式)
+// Firebase SDK 不要
 
-firebase.initializeApp({
-  apiKey: "AIzaSyCOJ6J5VguFaKjFie07ZddDNPP9lENm1EM",
-  authDomain: "rakashi-notifications.firebaseapp.com",
-  projectId: "rakashi-notifications",
-  storageBucket: "rakashi-notifications.firebasestorage.app",
-  messagingSenderId: "334549345938",
-  appId: "1:334549345938:web:3db734ed9175a710c7e84b",
-})
+self.addEventListener('push', (event) => {
+  if (!event.data) return
 
-const messaging = firebase.messaging()
+  let data = {}
+  try {
+    data = event.data.json()
+  } catch {
+    data = { title: '🚚 RakAshi', body: event.data.text() }
+  }
 
-messaging.onBackgroundMessage((payload) => {
-  console.log('Background message:', payload)
+  const { title, body, type, requestId } = data
 
-  const { title, body } = payload.notification ?? {}
-
-  self.registration.showNotification(title ?? '新しい配送依頼', {
-    body: body ?? '依頼が届きました',
+  const options = {
+    body: body || '配送依頼が届きました',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    vibrate: [200, 100, 200],
-    data: payload.data,
-    actions: [
-      { action: 'accept', title: '承諾' },
-      { action: 'reject', title: '拒否' },
-    ],
-  })
+    vibrate: [200, 100, 200, 100, 200],
+    requireInteraction: true,
+    data: { type, requestId, url: '/dashboard' },
+    actions:
+      type === 'new_request'
+        ? [
+            { action: 'open', title: '確認する' },
+            { action: 'dismiss', title: '後で' },
+          ]
+        : [{ action: 'open', title: '確認する' }],
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(title || '🚚 RakAshi', options)
+  )
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  clients.openWindow('/dashboard')
+
+  const url = event.notification.data?.url || '/dashboard'
+
+  event.waitUntil(
+    clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if (
+            client.url.includes(self.location.origin) &&
+            'focus' in client
+          ) {
+            client.focus()
+            client.postMessage({
+              type: 'NOTIFICATION_CLICK',
+              data: event.notification.data,
+            })
+            return
+          }
+        }
+        if (clients.openWindow) {
+          return clients.openWindow(url)
+        }
+      })
+  )
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'PUSH_RECEIVED') {
+    clients.matchAll({ type: 'window' }).then((clientList) => {
+      clientList.forEach((client) => {
+        client.postMessage({
+          type: 'PUSH_MESSAGE',
+          payload: event.data.payload,
+        })
+      })
+    })
+  }
 })

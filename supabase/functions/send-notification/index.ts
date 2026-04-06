@@ -1,12 +1,15 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// @ts-ignore - npm module for Deno
+import webpush from 'npm:web-push'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type',
+}
 
 serve(async (req) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  }
-
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -20,7 +23,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get driver FCM token
+    // ドライバーの Web Push サブスクリプションを取得
     const { data: driver } = await supabase
       .from('driver_profiles')
       .select('fcm_token, name')
@@ -29,65 +32,50 @@ serve(async (req) => {
 
     if (!driver?.fcm_token) {
       return new Response(
-        JSON.stringify({ error: 'No FCM token for driver' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'No push subscription for driver' }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
       )
     }
 
-    // Get OAuth2 access token for FCM v1 API
-    const accessToken = Deno.env.get('FIREBASE_SERVER_KEY')
-    const projectId = Deno.env.get('FIREBASE_PROJECT_ID') ?? 'rakashi-notifications'
-
-    const fcmResponse = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: {
-            token: driver.fcm_token,
-            notification: {
-              title: '🚚 新しい配送依頼',
-              body: `${pickupAddress} → ${deliveryAddress} ₹${fare}`,
-            },
-            data: {
-              requestId: String(requestId),
-              pickupAddress: String(pickupAddress),
-              deliveryAddress: String(deliveryAddress),
-              fare: String(fare),
-              type: 'new_request',
-            },
-            android: {
-              priority: 'high',
-              notification: {
-                sound: 'default',
-                channel_id: 'delivery_requests',
-              },
-            },
-            webpush: {
-              headers: { Urgency: 'high' },
-              notification: {
-                requireInteraction: true,
-                vibrate: [200, 100, 200],
-              },
-            },
-          },
-        }),
-      }
+    // VAPID 設定
+    webpush.setVapidDetails(
+      Deno.env.get('VAPID_SUBJECT') ?? 'mailto:admin@rakashi.com',
+      Deno.env.get('VAPID_PUBLIC_KEY')!,
+      Deno.env.get('VAPID_PRIVATE_KEY')!
     )
 
-    const result = await fcmResponse.json()
-    return new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    // サブスクリプション情報をパース
+    const subscription = JSON.parse(driver.fcm_token)
+
+    // 暗号化済みプッシュ通知を送信
+    await webpush.sendNotification(
+      subscription,
+      JSON.stringify({
+        title: '🚚 新しい配送依頼',
+        body: `${pickupAddress} → ${deliveryAddress}  ₹${fare}`,
+        type: 'new_request',
+        requestId: String(requestId),
+      })
+    )
+
+    return new Response(
+      JSON.stringify({ success: true }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    )
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    console.error('send-notification error:', err)
+    return new Response(
+      JSON.stringify({ error: String(err) }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    )
   }
 })

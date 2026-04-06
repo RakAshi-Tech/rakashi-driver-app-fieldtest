@@ -11,7 +11,7 @@ import { Truck } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
-import { requestNotificationPermission, onMessage, messaging } from "@/lib/firebase"
+import { requestNotificationPermission, onMessage } from "@/lib/firebase"
 
 export default function HomePage() {
   const router = useRouter()
@@ -117,34 +117,32 @@ export default function HomePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── FCM setup ────────────────────────────────────────────────────────────────
+  // ── Web Push setup ───────────────────────────────────────────────────────────
   useEffect(() => {
-    const setupFCM = async () => {
+    const setupPushNotification = async () => {
       try {
-        const token = await requestNotificationPermission()
-        if (!token) return
+        const subscriptionJson = await requestNotificationPermission()
+        if (!subscriptionJson) return
 
         const driverId = localStorage.getItem('driverId') || 'demo'
 
         await supabase
           .from('driver_profiles')
-          .update({ fcm_token: token })
+          .update({ fcm_token: subscriptionJson })
           .eq('id', driverId)
 
-        localStorage.setItem('fcmToken', token)
+        localStorage.setItem('pushSubscription', subscriptionJson)
 
-        if (messaging) {
-          onMessage(messaging, (payload) => {
-            console.log('Foreground message:', payload)
-            // Foreground: handled by existing Realtime modal
-          })
-        }
+        onMessage((payload) => {
+          console.log('Foreground push received:', payload)
+          // Foreground: handled by existing Realtime modal
+        })
       } catch (err) {
-        console.error('FCM setup error:', err)
+        console.error('Push notification setup error:', err)
       }
     }
 
-    setupFCM()
+    setupPushNotification()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
