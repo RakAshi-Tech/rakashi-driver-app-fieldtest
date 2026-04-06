@@ -11,6 +11,7 @@ import { Truck } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
+import { requestNotificationPermission, onMessage, messaging } from "@/lib/firebase"
 
 export default function HomePage() {
   const router = useRouter()
@@ -113,6 +114,37 @@ export default function HomePage() {
       .subscribe()
 
     return () => { supabase.removeChannel(subscription) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── FCM setup ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const setupFCM = async () => {
+      try {
+        const token = await requestNotificationPermission()
+        if (!token) return
+
+        const driverId = localStorage.getItem('driverId') || 'demo'
+
+        await supabase
+          .from('driver_profiles')
+          .update({ fcm_token: token })
+          .eq('id', driverId)
+
+        localStorage.setItem('fcmToken', token)
+
+        if (messaging) {
+          onMessage(messaging, (payload) => {
+            console.log('Foreground message:', payload)
+            // Foreground: handled by existing Realtime modal
+          })
+        }
+      } catch (err) {
+        console.error('FCM setup error:', err)
+      }
+    }
+
+    setupFCM()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
