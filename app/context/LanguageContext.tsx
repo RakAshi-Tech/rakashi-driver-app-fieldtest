@@ -187,6 +187,18 @@ const translations: Record<Lang, Record<string, string>> = {
     uploading: 'अपलोड हो रहा है...',
     photoRequired: 'कृपया फ़ोटो लें',
 
+    // === delivery request ===
+    newRequestTitle: 'नई डिलीवरी अनुरोध!',
+    acceptRequest: 'स्वीकार करें',
+    rejectRequest: 'अस्वीकार करें',
+    pickupHeading: 'पिकअप स्थान पर जाएं',
+    pickupComplete: '✓ पिकअप पूर्ण - डिलीवरी शुरू करें',
+    nextDestination: 'अगला गंतव्य (डिलीवरी)',
+    pickupLabel: 'पिकअप स्थान',
+    deliveryLabel: 'डिलीवरी स्थान',
+    itemLabel: 'सामान',
+    fareLabel: 'किराया',
+
     // === エラー・共通メッセージ ===
     loading: 'लोड हो रहा है...',
     error: 'त्रुटि',
@@ -372,6 +384,18 @@ const translations: Record<Lang, Record<string, string>> = {
     retake: 'Retake',
     uploading: 'Uploading...',
     photoRequired: 'Please take a photo',
+
+    // === delivery request ===
+    newRequestTitle: 'New Delivery Request!',
+    acceptRequest: 'Accept',
+    rejectRequest: 'Reject',
+    pickupHeading: 'Head to Pickup Location',
+    pickupComplete: '✓ Pickup Complete - Start Delivery',
+    nextDestination: 'Next Stop (Delivery)',
+    pickupLabel: 'Pickup Location',
+    deliveryLabel: 'Delivery Location',
+    itemLabel: 'Item',
+    fareLabel: 'Fare',
 
     // === エラー・共通メッセージ ===
     loading: 'Loading...',

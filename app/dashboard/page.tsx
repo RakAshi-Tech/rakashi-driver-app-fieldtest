@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { DriverProfileCard } from "@/components/driver-profile-card"
 import { TrustScoreCard } from "@/components/trust-score-card"
@@ -17,6 +17,10 @@ export default function HomePage() {
   const { t } = useLang()
   const [driverProfile, setDriverProfile] = useState<any>(null)
   const [todayJobs, setTodayJobs] = useState<Job[]>([])
+  const [showRequestModal, setShowRequestModal] = useState(false)
+  const [incomingRequest, setIncomingRequest] = useState<any>(null)
+  const [countdown, setCountdown] = useState(60)
+  const incomingRequestRef = useRef<any>(null)
 
   useEffect(() => {
     const loadData = async () => {
@@ -61,6 +65,136 @@ export default function HomePage() {
     loadData()
   }, [])
 
+  // ── Notification sound ──────────────────────────────────────────────────────
+  const playNotificationSound = () => {
+    try {
+      const ctx = new AudioContext()
+      const oscillator = ctx.createOscillator()
+      const gainNode = ctx.createGain()
+      oscillator.connect(gainNode)
+      gainNode.connect(ctx.destination)
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime)
+      oscillator.frequency.setValueAtTime(440, ctx.currentTime + 0.1)
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.2)
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+      oscillator.start(ctx.currentTime)
+      oscillator.stop(ctx.currentTime + 0.5)
+    } catch (err) {
+      console.log('Audio not available')
+    }
+  }
+
+  // ── Supabase Realtime: watch request_notifications ───────────────────────────
+  useEffect(() => {
+    const driverId = localStorage.getItem('driverId') || 'demo'
+
+    const subscription = supabase
+      .channel('new_requests')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'request_notifications',
+        filter: `driver_id=eq.${driverId}`,
+      }, async (payload: any) => {
+        const { data: request } = await supabase
+          .from('delivery_requests')
+          .select('*')
+          .eq('id', payload.new.request_id)
+          .single()
+
+        if (request) {
+          incomingRequestRef.current = request
+          setIncomingRequest(request)
+          setShowRequestModal(true)
+          playNotificationSound()
+        }
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(subscription) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Countdown timer ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!showRequestModal) return
+    setCountdown(60)
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          const req = incomingRequestRef.current
+          if (req) {
+            const driverId = localStorage.getItem('driverId') || 'demo'
+            supabase
+              .from('request_notifications')
+              .update({ status: 'rejected', responded_at: new Date().toISOString() })
+              .eq('request_id', req.id)
+              .eq('driver_id', driverId)
+              .then(() => {})
+          }
+          setShowRequestModal(false)
+          setIncomingRequest(null)
+          incomingRequestRef.current = null
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [showRequestModal])
+
+  // ── Accept handler ───────────────────────────────────────────────────────────
+  const handleAcceptRequest = async () => {
+    if (!incomingRequest) return
+    const driverId = localStorage.getItem('driverId') || 'demo'
+
+    await supabase
+      .from('delivery_requests')
+      .update({
+        driver_id: driverId,
+        status: 'accepted',
+        accepted_at: new Date().toISOString(),
+      })
+      .eq('id', incomingRequest.id)
+
+    await supabase
+      .from('request_notifications')
+      .update({ status: 'accepted', responded_at: new Date().toISOString() })
+      .eq('request_id', incomingRequest.id)
+      .eq('driver_id', driverId)
+
+    localStorage.setItem('currentRequestId', incomingRequest.id)
+    localStorage.setItem('pickupLat', incomingRequest.pickup_lat ?? '')
+    localStorage.setItem('pickupLng', incomingRequest.pickup_lng ?? '')
+    localStorage.setItem('pickupAddress', incomingRequest.pickup_address ?? '')
+    localStorage.setItem('deliveryLat', incomingRequest.delivery_lat ?? '')
+    localStorage.setItem('deliveryLng', incomingRequest.delivery_lng ?? '')
+    localStorage.setItem('deliveryAddress', incomingRequest.delivery_address ?? '')
+    localStorage.setItem('requestFare', incomingRequest.proposed_fare_inr ?? '')
+
+    setShowRequestModal(false)
+    incomingRequestRef.current = null
+    router.push('/pickup')
+  }
+
+  // ── Reject handler ───────────────────────────────────────────────────────────
+  const handleRejectRequest = async () => {
+    if (!incomingRequest) return
+    const driverId = localStorage.getItem('driverId') || 'demo'
+
+    await supabase
+      .from('request_notifications')
+      .update({ status: 'rejected', responded_at: new Date().toISOString() })
+      .eq('request_id', incomingRequest.id)
+      .eq('driver_id', driverId)
+
+    setShowRequestModal(false)
+    setIncomingRequest(null)
+    incomingRequestRef.current = null
+  }
+
   const activeJobs  = todayJobs.filter((job) => job.status !== "done")
   const completedJobs = todayJobs.filter((job) => job.status === "done")
   const firstPendingJob = todayJobs.find((job) => job.status === "pending")
@@ -70,6 +204,7 @@ export default function HomePage() {
   }
 
   return (
+    <>
     <div className="min-h-screen bg-background flex flex-col">
         {/* Header with Language Toggle */}
         <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
@@ -117,5 +252,102 @@ export default function HomePage() {
           </Button>
         </div>
     </div>
+
+    {/* ── Incoming request modal ─────────────────────────────────────────── */}
+    {showRequestModal && incomingRequest && (
+      <div style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.85)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+        padding: '16px',
+      }}>
+        <div style={{
+          background: '#1a1a2e',
+          borderRadius: '20px',
+          padding: '24px',
+          width: '100%',
+          maxWidth: '380px',
+        }}>
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <div style={{ fontSize: '40px', marginBottom: '8px' }}>🚚</div>
+            <h2 style={{ color: '#f97316', fontSize: '20px', margin: '0 0 4px' }}>
+              {t('newRequestTitle')}
+            </h2>
+            <div style={{
+              fontSize: '28px',
+              fontWeight: 'bold',
+              color: countdown <= 10 ? '#ef4444' : '#ffffff',
+            }}>
+              {countdown}s
+            </div>
+          </div>
+
+          {/* Delivery info */}
+          {[
+            { icon: '📍', label: t('pickupLabel'), value: incomingRequest.pickup_address },
+            { icon: '🏁', label: t('deliveryLabel'), value: incomingRequest.delivery_address },
+            { icon: '📦', label: t('itemLabel'), value: `${incomingRequest.item_description ?? '—'} × ${incomingRequest.item_quantity ?? '—'}` },
+            { icon: '💰', label: t('fareLabel'), value: `₹${incomingRequest.proposed_fare_inr ?? '—'}` },
+          ].map(item => (
+            <div key={item.label} style={{
+              display: 'flex',
+              gap: '12px',
+              padding: '10px 0',
+              borderBottom: '1px solid #374151',
+            }}>
+              <span style={{ fontSize: '18px' }}>{item.icon}</span>
+              <div>
+                <div style={{ fontSize: '11px', color: '#9ca3af' }}>{item.label}</div>
+                <div style={{ fontSize: '14px', color: '#ffffff', fontWeight: '500' }}>
+                  {item.value ?? '—'}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+            <button
+              onClick={handleRejectRequest}
+              style={{
+                flex: 1,
+                padding: '16px',
+                background: '#374151',
+                border: 'none',
+                borderRadius: '12px',
+                color: '#ffffff',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              {t('rejectRequest')}
+            </button>
+            <button
+              onClick={handleAcceptRequest}
+              style={{
+                flex: 2,
+                padding: '16px',
+                background: '#f97316',
+                border: 'none',
+                borderRadius: '12px',
+                color: '#ffffff',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              ✓ {t('acceptRequest')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

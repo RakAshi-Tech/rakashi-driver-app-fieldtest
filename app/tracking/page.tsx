@@ -502,8 +502,32 @@ export default function TrackingPage() {
   }, [])
 
   // ── STEP 4: Navigate to arrival confirmation screen ──────────────────────
-  const handleAtDestination = () => {
+  const handleAtDestination = async () => {
     localStorage.setItem('totalTraveledMeters', String(totalTraveledRef.current))
+
+    const requestId = localStorage.getItem('currentRequestId')
+    if (requestId) {
+      const fareStr = localStorage.getItem('requestFare')
+      const earningsInr = fareStr ? parseFloat(fareStr) : null
+      await supabase
+        .from('delivery_requests')
+        .update({
+          status: 'delivered',
+          delivered_at: new Date().toISOString(),
+          final_fare_inr: earningsInr,
+        })
+        .eq('id', requestId)
+
+      localStorage.removeItem('currentRequestId')
+      localStorage.removeItem('pickupLat')
+      localStorage.removeItem('pickupLng')
+      localStorage.removeItem('pickupAddress')
+      localStorage.removeItem('deliveryLat')
+      localStorage.removeItem('deliveryLng')
+      localStorage.removeItem('deliveryAddress')
+      localStorage.removeItem('requestFare')
+    }
+
     router.push('/arrival')
   }
 
