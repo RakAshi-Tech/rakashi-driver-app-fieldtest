@@ -151,7 +151,11 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // === confidence-bar ===
     routeConfidence: 'मार्ग विश्वसनीयता',
+    newDriver: 'नया ड्राइवर',
+    buildingReliability: 'विश्वसनीयता बन रही है',
+    goodReliability: 'अच्छी विश्वसनीयता',
     highReliability: 'उच्च विश्वसनीयता',
+    veryHighReliability: 'बहुत उच्च विश्वसनीयता',
     arrivedSuccessfully: 'सफलतापूर्वक पहुंचे',
     times: 'बार',
 
@@ -349,7 +353,11 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // === confidence-bar ===
     routeConfidence: 'Route Confidence',
+    newDriver: 'New Driver',
+    buildingReliability: 'Building Reliability',
+    goodReliability: 'Good Reliability',
     highReliability: 'High Reliability',
+    veryHighReliability: 'Very High Reliability',
     arrivedSuccessfully: 'Arrived Successfully',
     times: 'times',
 

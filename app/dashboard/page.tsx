@@ -23,6 +23,14 @@ export default function HomePage() {
   const [countdown, setCountdown] = useState(60)
   const incomingRequestRef = useRef<any>(null)
 
+  // ── calcStarRating ──────────────────────────────────────────────────────────
+  const calcStarRating = (trustScore: number): number => {
+    if (trustScore >= 80) return Math.min(5.0, 4.5 + (trustScore - 80) / 100)
+    if (trustScore >= 60) return 4.0 + (trustScore - 60) / 80
+    if (trustScore >= 30) return 3.5 + (trustScore - 30) / 120
+    return 3.0 + (trustScore - 10) / 100
+  }
+
   useEffect(() => {
     const loadData = async () => {
       const phone = localStorage.getItem("rakashi_phone")
@@ -37,8 +45,9 @@ export default function HomePage() {
       if (!profile) return
       setDriverProfile(profile)
 
-      // Store driverId for tracking page
+      // Store driverId and name for tracking page and fallback
       if (profile.id) localStorage.setItem("driverId", profile.id)
+      if (profile.name) localStorage.setItem("driverName", profile.name)
 
       // Fetch today's deliveries
       const todayStart = new Date()
@@ -65,6 +74,31 @@ export default function HomePage() {
     }
     loadData()
   }, [])
+
+  // ── driverId フォールバック（phone での取得が失敗した場合）────────────────
+  useEffect(() => {
+    const fetchDriverProfile = async () => {
+      if (driverProfile) return  // 既に取得済みならスキップ
+      const driverId = localStorage.getItem('driverId')
+      if (!driverId) return
+
+      const { data } = await supabase
+        .from('driver_profiles')
+        .select('name, trust_score, total_deliveries, experience_years, vehicle_type, id')
+        .eq('id', driverId)
+        .single()
+
+      if (data) {
+        setDriverProfile(data)
+        localStorage.setItem('driverName', data.name)
+      } else {
+        const savedName = localStorage.getItem('driverName')
+        if (savedName) setDriverProfile((prev: any) => prev ?? { name: savedName, trust_score: 10 })
+      }
+    }
+    fetchDriverProfile()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverProfile])
 
   // ── Notification sound ──────────────────────────────────────────────────────
   const playNotificationSound = () => {
@@ -253,7 +287,7 @@ export default function HomePage() {
             yearsExperience={driverProfile?.experience_years ?? 0}
             onTimeRate={98}
             responseRate={97}
-            rating={4.6}
+            rating={calcStarRating(driverProfile?.trust_score ?? 10)}
             deliveryTimes={{ under5km: 27, from5to10km: 50, over10km: "TBD" }}
             isAccepting={true}
           />
