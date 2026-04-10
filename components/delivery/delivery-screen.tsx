@@ -178,6 +178,29 @@ export function DeliveryScreen({
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
+  // ── Return to tracking if driver moves 50m+ away from destination ───────────
+  useEffect(() => {
+    if (!destination) return
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const distance = haversineDistance(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          destination.lat,
+          destination.lng
+        )
+        if (distance > 50) {
+          router.push('/tracking')
+        }
+      },
+      (err) => console.error(err),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [destination, router])
+
   // ── OSRM fallback: fetch route if not in localStorage ───────────────────────
   useEffect(() => {
     if (routeCoordinates.length > 0) return       // already have route

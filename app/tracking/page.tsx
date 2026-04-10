@@ -199,6 +199,8 @@ export default function TrackingPage() {
   const [eta, setEta]                       = useState(0)
   const [showDeviation, setShowDeviation]   = useState(false)
   const [showArrived, setShowArrived]       = useState(false)
+  const [isNearDestination, setIsNearDestination] = useState(false)
+  const [nearbySeconds, setNearbySeconds]         = useState(0)
 
   // ── Timer state ────────────────────────────────────────────────────────────
   const [movingDisplay,  setMovingDisplay]  = useState("00:00")
@@ -216,6 +218,8 @@ export default function TrackingPage() {
   const movingSecsRef   = useRef(0)
   const stoppedSecsRef  = useRef(0)
   const langRef         = useRef<'hi' | 'en'>('hi')
+  const nearbyTimerRef  = useRef<NodeJS.Timeout | null>(null)
+  const nearbyStartRef  = useRef<number | null>(null)
 
   // ── Refs (Supabase) ────────────────────────────────────────────────────────
   const deliveryIdRef       = useRef<string | null>(null)
@@ -383,6 +387,15 @@ export default function TrackingPage() {
     }
   }, [deliveryStatus])
 
+  // ── Proximity timer cleanup ────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (nearbyTimerRef.current) {
+        clearInterval(nearbyTimerRef.current)
+      }
+    }
+  }, [])
+
   // ── GPS watchPosition ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!navigator.geolocation) return
@@ -429,6 +442,59 @@ export default function TrackingPage() {
         isRerouting = false
         rerouteCooldownUntil = Date.now() + 10000
       }, 3000)
+    }
+
+    const checkProximityToDestination = (
+      currentLat: number,
+      currentLng: number,
+      destLat: number,
+      destLng: number
+    ) => {
+      const distance = haversineDistance(currentLat, currentLng, destLat, destLng)
+      const THRESHOLD = 30
+
+      if (distance <= THRESHOLD) {
+        if (!nearbyStartRef.current) {
+          if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(
+              langRef.current === 'hi'
+                ? 'गंतव्य के पास पहुंच गए। रुकें।'
+                : 'Approaching destination. Please stop.'
+            )
+            utterance.lang = langRef.current === 'hi' ? 'hi-IN' : 'en-US'
+            speechSynthesis.cancel()
+            speechSynthesis.speak(utterance)
+          }
+
+          nearbyStartRef.current = Date.now()
+          setIsNearDestination(true)
+          setNearbySeconds(0)
+
+          nearbyTimerRef.current = setInterval(() => {
+            const elapsed = Math.floor(
+              (Date.now() - (nearbyStartRef.current ?? Date.now())) / 1000
+            )
+            setNearbySeconds(elapsed)
+
+            if (elapsed >= 5) {
+              clearInterval(nearbyTimerRef.current!)
+              nearbyTimerRef.current = null
+              nearbyStartRef.current = null
+              setIsNearDestination(false)
+              setNearbySeconds(0)
+              router.push('/delivery-screen')
+            }
+          }, 1000)
+        }
+      } else {
+        if (nearbyStartRef.current) {
+          clearInterval(nearbyTimerRef.current!)
+          nearbyTimerRef.current = null
+          nearbyStartRef.current = null
+          setIsNearDestination(false)
+          setNearbySeconds(0)
+        }
+      }
     }
 
     const handleSuccess = (pos: GeolocationPosition) => {
@@ -484,6 +550,10 @@ export default function TrackingPage() {
         setDeliveryStatus("En Route")
       } else {
         setDeliveryStatus("Preparing")
+      }
+
+      if (d.lat && d.lng) {
+        checkProximityToDestination(curr[0], curr[1], d.lat, d.lng)
       }
 
       if (!isRerouting && Date.now() > rerouteCooldownUntil && route.length > 0) {
@@ -696,6 +766,43 @@ export default function TrackingPage() {
           {t('autoDetecting')}
         </div>
       </div>
+
+      {/* ── Proximity countdown indicator ──────────────────────────────────── */}
+      {isNearDestination && (
+        <div style={{
+          padding: '10px 16px',
+          background: '#1a1a2e',
+          borderTop: '1px solid #374151',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+        }}>
+          <div style={{
+            flex: 1,
+            height: '6px',
+            background: '#374151',
+            borderRadius: '3px',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${(nearbySeconds / 5) * 100}%`,
+              height: '100%',
+              background: '#f97316',
+              borderRadius: '3px',
+              transition: 'width 0.9s linear',
+            }} />
+          </div>
+          <span style={{
+            fontSize: '13px',
+            color: '#f97316',
+            fontWeight: 'bold',
+            minWidth: '60px',
+            textAlign: 'right',
+          }}>
+            {5 - nearbySeconds}s...
+          </span>
+        </div>
+      )}
 
       {/* ── I'm at the destination ─────────────────────────────────────────── */}
       <div style={{ padding: "10px 16px 4px", flexShrink: 0 }}>
