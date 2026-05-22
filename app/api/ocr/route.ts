@@ -71,5 +71,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ id: data.id, raw_text: rawText, ...parsed })
+  return NextResponse.json({ id: (data as { id: string }).id, raw_text: rawText, ...parsed })
 }
