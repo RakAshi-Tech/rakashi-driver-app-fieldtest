@@ -59,15 +59,16 @@ interface QueryPayload {
   headOnly?: boolean
 }
 
-interface ApiResult<T = unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface ApiResult<T = any> {
   data: T | null
-  error: { message: string } | null
+  error: { message: string; code?: string } | null
   count?: number
 }
 
 // ── Select query builder ──────────────────────────────────────────────────────
 
-class SelectBuilder<T = unknown> {
+class SelectBuilder<T = any> {
   protected payload: QueryPayload
 
   constructor(table: string) {
@@ -116,7 +117,7 @@ class SelectBuilder<T = unknown> {
 
 // ── Mutation builder (insert / upsert / update) ───────────────────────────────
 
-class MutationBuilder<T = unknown> {
+class MutationBuilder<T = any> {
   protected payload: QueryPayload
 
   constructor(
@@ -153,7 +154,7 @@ class MutationBuilder<T = unknown> {
 
 // ── Delete builder ────────────────────────────────────────────────────────────
 
-class DeleteBuilder<T = unknown> {
+class DeleteBuilder<T = any> {
   private payload: QueryPayload
 
   constructor(table: string) {
@@ -278,7 +279,7 @@ class SupabaseAWSClient {
         new SelectBuilder(table).select(columns, opts),
       insert: (data: Record<string, unknown>) =>
         new MutationBuilder(table, 'insert', data),
-      upsert: (data: Record<string, unknown>, opts?: { onConflict?: string }) =>
+      upsert: (data: Record<string, unknown>, opts?: { onConflict?: string; ignoreDuplicates?: boolean }) =>
         new MutationBuilder(table, 'upsert', data, opts?.onConflict),
       update: (data: Record<string, unknown>) =>
         new MutationBuilder(table, 'update', data),

@@ -61,7 +61,7 @@ export default function HomePage() {
         .order("started_at", { ascending: false })
 
       if (deliveries) {
-        const jobs: Job[] = deliveries.map((d, i) => ({
+        const jobs: Job[] = deliveries.map((d: any, i: number) => ({
           id: d.id,
           shipperName: d.job_id || `Delivery #${i + 1}`,
           blockNumber: "–",
