@@ -10,7 +10,7 @@ import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
 
 type Screen = "phone" | "otp" | "profile"
-type VehicleType = "E-Rickshaw" | "Cargo Bike" | "Other"
+type VehicleType = "E-Rickshaw"
 type LoginTab = "whatsapp" | "sms"
 
 // TODO: Replace with real WhatsApp Business API
@@ -227,7 +227,9 @@ export default function LoginPage() {
   }
 
   const isOtpComplete = otp.every((d) => d !== "")
-  const vehicleOptions: VehicleType[] = ["E-Rickshaw", "Cargo Bike", "Other"]
+  const vehicleOptions: { value: VehicleType; label: string }[] = [
+    { value: "E-Rickshaw", label: "N-CarGo" },
+  ]
 
   // OTP screen colors based on active tab
   const otpBubbleColor = loginTab === "whatsapp" ? "#25D366" : "#F97316"
@@ -551,18 +553,14 @@ export default function LoginPage() {
                 <label className="text-xs text-muted-foreground mb-1.5 block">
                   {lang === "en" ? "Vehicle type" : "वाहन का प्रकार"}
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {vehicleOptions.map((v) => (
+                <div className="grid grid-cols-1 gap-2">
+                  {vehicleOptions.map(({ value, label }) => (
                     <button
-                      key={v}
-                      onClick={() => setVehicleType(v)}
-                      className={`h-12 rounded-xl text-sm font-medium border transition-colors ${
-                        vehicleType === v
-                          ? "bg-primary text-white border-primary"
-                          : "bg-input border-border text-muted-foreground hover:text-foreground"
-                      }`}
+                      key={value}
+                      onClick={() => setVehicleType(value)}
+                      className="h-12 rounded-xl text-sm font-medium border transition-colors bg-primary text-white border-primary"
                     >
-                      {v === "E-Rickshaw" ? "🛺 " + v : v === "Cargo Bike" ? "🚲 " + v : "🚐 " + v}
+                      🛺 {label}
                     </button>
                   ))}
                 </div>

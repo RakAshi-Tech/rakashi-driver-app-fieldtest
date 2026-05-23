@@ -11,7 +11,7 @@ const PROTECTED_PATHS = [
   "/set-destination",
 ]
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const isProtected = PROTECTED_PATHS.some((path) => pathname.startsWith(path))

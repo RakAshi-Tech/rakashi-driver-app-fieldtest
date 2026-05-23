@@ -104,9 +104,9 @@ async function getPool(): Promise<Pool> {
     user,
     password,
     ssl: { rejectUnauthorized: false },
-    max: 5,
+    max: 1,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 10_000,
   })
   return pool
 }
