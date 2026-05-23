@@ -49,6 +49,7 @@ const VALID_TABLES = new Set([
   'delivery_requests',
   'request_notifications',
   'ocr_logs',
+  'penalties',
 ])
 
 const RESPONSE_HEADERS = {
@@ -158,12 +159,13 @@ interface QueryPayload {
   orderBy?: { column: string; ascending: boolean }
   countExact?: boolean
   headOnly?: boolean
+  limit?: number
 }
 
 async function handleQuery(payload: QueryPayload): Promise<object> {
   const {
     table, operation, columns, filters = [],
-    data, onConflict, single, orderBy, countExact, headOnly,
+    data, onConflict, single, orderBy, countExact, headOnly, limit,
   } = payload
 
   if (!VALID_TABLES.has(table)) {
@@ -180,8 +182,8 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
     const order = orderBy
       ? `ORDER BY ${col(orderBy.column)} ${orderBy.ascending ? 'ASC' : 'DESC'}`
       : ''
-    const limit = single ? 'LIMIT 1' : ''
-    const sql = [`SELECT ${selectExpr}`, `FROM "${table}"`, where, order, limit]
+    const limitClause = single ? 'LIMIT 1' : limit ? `LIMIT ${limit}` : ''
+    const sql = [`SELECT ${selectExpr}`, `FROM "${table}"`, where, order, limitClause]
       .filter(Boolean).join(' ')
 
     const result = await db.query(sql, params)

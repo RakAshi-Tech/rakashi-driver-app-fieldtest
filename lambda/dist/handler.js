@@ -48,6 +48,7 @@ const VALID_TABLES = new Set([
     'delivery_requests',
     'request_notifications',
     'ocr_logs',
+    'penalties',
 ]);
 const RESPONSE_HEADERS = {
     'Content-Type': 'application/json',
@@ -124,7 +125,7 @@ function parseColumns(columns) {
     return columns.split(',').map(c => col(c.trim())).join(', ');
 }
 async function handleQuery(payload) {
-    const { table, operation, columns, filters = [], data, onConflict, single, orderBy, countExact, headOnly, } = payload;
+    const { table, operation, columns, filters = [], data, onConflict, single, orderBy, countExact, headOnly, limit, } = payload;
     if (!VALID_TABLES.has(table)) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid table name' }) };
     }
@@ -137,8 +138,8 @@ async function handleQuery(payload) {
         const order = orderBy
             ? `ORDER BY ${col(orderBy.column)} ${orderBy.ascending ? 'ASC' : 'DESC'}`
             : '';
-        const limit = single ? 'LIMIT 1' : '';
-        const sql = [`SELECT ${selectExpr}`, `FROM "${table}"`, where, order, limit]
+        const limitClause = single ? 'LIMIT 1' : limit ? `LIMIT ${limit}` : '';
+        const sql = [`SELECT ${selectExpr}`, `FROM "${table}"`, where, order, limitClause]
             .filter(Boolean).join(' ');
         const result = await db.query(sql, params);
         if (countExact || headOnly) {
