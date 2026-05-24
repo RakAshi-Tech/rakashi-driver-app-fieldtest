@@ -29,6 +29,7 @@ CREATE TABLE driver_profiles (
   total_deliveries    INTEGER       NOT NULL DEFAULT 0,
   total_earnings_inr  NUMERIC(12,2) NOT NULL DEFAULT 0,
   fcm_token           TEXT,                           -- Web Push subscription JSON
+  is_active           BOOLEAN       NOT NULL DEFAULT true,
   created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -191,6 +192,23 @@ $$;
 CREATE TRIGGER trg_driver_profiles_updated_at
   BEFORE UPDATE ON driver_profiles
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 8. penalties
+--    Source: rakashi-admin penalties page
+-- ============================================================
+CREATE TABLE IF NOT EXISTS penalties (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  driver_id   TEXT        NOT NULL,
+  type        TEXT        NOT NULL,
+  message     TEXT,
+  created_by  TEXT        DEFAULT 'admin',
+  resolved_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_penalties_driver    ON penalties (driver_id);
+CREATE INDEX idx_penalties_created   ON penalties (created_at DESC);
 
 -- ============================================================
 -- NOTE: Storage (S3)
