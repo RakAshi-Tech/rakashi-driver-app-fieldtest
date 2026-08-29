@@ -1,0 +1,234 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  RakAshi Driver App - Phase 1 authentication.
+  Creates a NEW Cognito user pool that signs in with phone_number, plus the JWT
+  authorizer for the existing HTTP API. This stack is deliberately independent of
+  DeliveryAwsStack (the CDK stack that owns the VPC/RDS/S3/legacy user pool);
+  nothing in that stack is referenced or modified.
+
+Parameters:
+  ApiId:
+    Type: String
+    Description: Existing API Gateway HTTP API id (rakashi-driver-gateway)
+    AllowedPattern: "^[a-z0-9]+$"
+
+  RefreshTokenDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+    Description: How long a driver stays signed in without re-entering credentials
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Pre sign-up trigger
+  #
+  # Phase 1 has no SMS delivery (Indian DLT registration is still outstanding),
+  # so a freshly signed-up user would sit in UNCONFIRMED forever and could never
+  # sign in. This trigger confirms the account so the password becomes usable.
+  #
+  # It deliberately does NOT set autoVerifyPhone: nobody has proven ownership of
+  # the number yet, and claiming otherwise would put a false phone_number_verified
+  # claim in every token. Phase 2 turns on SMS_OTP, which verifies the number for
+  # real, and this trigger is removed.
+  # ---------------------------------------------------------------------------
+  PreSignUpFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  PreSignUpFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: rakashi-driver-pre-signup
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt PreSignUpFunctionRole.Arn
+      Timeout: 5
+      Code:
+        ZipFile: |
+          // Phase 1: confirm the account so the password can be used.
+          // Phone ownership is NOT asserted - SMS_OTP in Phase 2 does that.
+          exports.handler = async (event) => {
+            event.response.autoConfirmUser = true
+            event.response.autoVerifyPhone = false
+            event.response.autoVerifyEmail = false
+            return event
+          }
+
+  PreSignUpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreSignUpFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt DriverUserPool.Arn
+
+  # ---------------------------------------------------------------------------
+  # Pre token generation trigger
+  #
+  # The API is authorized with access tokens, and a Cognito access token carries
+  # no phone_number. The backend needs one it can trust: it is the key that links
+  # a driver to their existing driver_profiles row, and the value stored on a new
+  # profile. Taking it from the request body would mean trusting the client with
+  # exactly the identifier this whole phase exists to protect.
+  #
+  # This trigger copies the pool's own phone_number attribute into the access
+  # token, so the value arrives signed by Cognito and validated by API Gateway.
+  # Requires the ESSENTIALS tier (V2_0 access token customisation).
+  # ---------------------------------------------------------------------------
+  PreTokenFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: rakashi-driver-pre-token
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt PreSignUpFunctionRole.Arn
+      Timeout: 5
+      Code:
+        ZipFile: |
+          // Copy the pool-held phone number into the access token so the API can
+          // identify the caller without trusting anything the client sends.
+          exports.handler = async (event) => {
+            const phone = event.request?.userAttributes?.phone_number
+            if (phone) {
+              event.response = {
+                claimsAndScopeOverrideDetails: {
+                  accessTokenGeneration: {
+                    claimsToAddOrOverride: { phone_number: phone },
+                  },
+                },
+              }
+            }
+            return event
+          }
+
+  PreTokenInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreTokenFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt DriverUserPool.Arn
+
+  # ---------------------------------------------------------------------------
+  # User pool
+  #
+  # UsernameAttributes is immutable after creation, which is exactly why the
+  # existing delivery-user-pool (email-only) cannot be reused. Phone number is
+  # the identifier drivers actually have.
+  # ---------------------------------------------------------------------------
+  DriverUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: rakashi-driver-pool
+      # ESSENTIALS is required for choice-based auth (SMS_OTP) in Phase 2.
+      # Setting it now avoids a pool replacement later.
+      UserPoolTier: ESSENTIALS
+      UsernameAttributes:
+        - phone_number
+      # Empty in Phase 1: no SMS channel exists, so nothing can be auto-verified.
+      # Phase 2 adds phone_number here.
+      AutoVerifiedAttributes: []
+      MfaConfiguration: "OFF"
+      DeletionProtection: ACTIVE
+      Policies:
+        PasswordPolicy:
+          # Tuned for drivers typing on a phone keypad: length and digits, but
+          # no symbol/uppercase requirements that drive people to write it down.
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: phone_number
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
+        PreTokenGenerationConfig:
+          LambdaArn: !GetAtt PreTokenFunction.Arn
+          LambdaVersion: V2_0
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: []
+
+  # ---------------------------------------------------------------------------
+  # App client
+  #
+  # Confidential (GenerateSecret) on purpose. Every Cognito call is made from
+  # Next.js route handlers, never from the browser, so the refresh token can live
+  # in an HttpOnly cookie and never touch JavaScript.
+  # ---------------------------------------------------------------------------
+  DriverAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: rakashi-driver-web
+      UserPoolId: !Ref DriverUserPool
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      # Short-lived access token; the refresh cookie is what keeps drivers signed in.
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: !Ref RefreshTokenDays
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      ReadAttributes:
+        - phone_number
+        - phone_number_verified
+      WriteAttributes:
+        - phone_number
+
+  # ---------------------------------------------------------------------------
+  # JWT authorizer on the existing HTTP API
+  #
+  # Creating the authorizer is additive - it does nothing until a route opts in.
+  # Wiring the three existing routes to it is the final, separately-reported step.
+  # ---------------------------------------------------------------------------
+  DriverJwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref ApiId
+      Name: rakashi-driver-jwt
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        # Cognito access tokens carry client_id rather than aud; API Gateway
+        # accepts the client id here for both token types.
+        Audience:
+          - !Ref DriverAppClient
+        Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${DriverUserPool}
+
+Outputs:
+  UserPoolId:
+    Value: !Ref DriverUserPool
+    Description: Cognito user pool id
+  UserPoolClientId:
+    Value: !Ref DriverAppClient
+    Description: App client id (public identifier, safe to expose)
+  IssuerUrl:
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${DriverUserPool}
+    Description: Token issuer, used by the API Gateway authorizer and Lambda
+  AuthorizerId:
+    Value: !Ref DriverJwtAuthorizer
+    Description: Attach this to the API routes in the final cutover step

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+import { bearerFrom, serverQuery } from "@/lib/api-server"
 
 function parseOcrText(text: string) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean)
@@ -27,6 +27,13 @@ function parseOcrText(text: string) {
 }
 
 export async function POST(request: NextRequest) {
+  // This route writes to the database, so it now requires the caller's own
+  // token and passes it straight through to the API.
+  const token = bearerFrom(request)
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const body = await request.json()
   const { image, language = "en" } = body
 
@@ -61,15 +68,20 @@ export async function POST(request: NextRequest) {
 
   const parsed = parseOcrText(rawText)
 
-  const { data, error } = await supabase
-    .from("ocr_logs")
-    .insert({ raw_text: rawText, language, ...parsed })
-    .select("id")
-    .single()
+  const { data, error } = await serverQuery<{ id: string }>(
+    {
+      table: "ocr_logs",
+      operation: "insert",
+      data: { raw_text: rawText, language, ...parsed },
+      columns: "id",
+      single: true,
+    },
+    token
+  )
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error || !data) {
+    return NextResponse.json({ error: error?.message ?? "Failed to save OCR log" }, { status: 500 })
   }
 
-  return NextResponse.json({ id: (data as { id: string }).id, raw_text: rawText, ...parsed })
+  return NextResponse.json({ id: data.id, raw_text: rawText, ...parsed })
 }

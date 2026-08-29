@@ -6,6 +6,7 @@ import { HelpCircle, FileText, Sparkles, Mic, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/app/context/LanguageContext";
 import { LangToggle } from "@/app/components/LangToggle";
+import { getAccessToken } from "@/lib/auth";
 import { DocumentScanView } from "@/components/ocr/document-scan-view";
 import {
   OcrFieldRow,
@@ -82,9 +83,14 @@ export default function WaybillOcrPage() {
     try {
       const base64 = await fileToBase64(file);
 
+      // The OCR route writes an ocr_logs row, so it needs the caller's token.
+      const token = await getAccessToken();
       const res = await fetch("/api/ocr", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ image: base64, language }),
       });
 

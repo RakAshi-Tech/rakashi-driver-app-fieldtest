@@ -8,10 +8,36 @@
  */
 
 const API_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL!
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? ''
 const S3_BASE = process.env.NEXT_PUBLIC_S3_PUBLIC_URL ?? ''
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
+
+/**
+ * Access token for the current visitor, or null when running on the server.
+ *
+ * Imported lazily so this module stays usable from route handlers: lib/auth is a
+ * client module, and a static import would pull it into the server bundle.
+ * Server-side callers use lib/api-server, which forwards the caller's own token.
+ */
+async function currentToken(): Promise<string | null> {
+  if (typeof window === 'undefined') return null
+  const { getAccessToken } = await import('./auth')
+  return getAccessToken()
+}
+
+async function send(path: string, body: unknown, token: string | null): Promise<Response> {
+  return fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      // The API is protected by a Cognito JWT authorizer. The old x-api-key
+      // header is gone: HTTP APIs never enforced it, and it shipped in the
+      // browser bundle where it was readable by anyone.
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    body: JSON.stringify(body),
+  })
+}
 
 async function callApi<T = unknown>(path: string, body: unknown): Promise<T> {
   if (!API_URL) {
@@ -20,14 +46,17 @@ async function callApi<T = unknown>(path: string, body: unknown): Promise<T> {
   }
   const url = `${API_URL}${path}`
   console.debug('[AWS] →', url)
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(API_KEY && { 'x-api-key': API_KEY }),
-    },
-    body: JSON.stringify(body),
-  })
+
+  let res = await send(path, body, await currentToken())
+
+  // Access tokens are short-lived, so an expiry mid-session is routine rather
+  // than an error. Renew once and replay before surfacing anything.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    const { renewAccessToken } = await import('./auth')
+    const renewed = await renewAccessToken()
+    if (renewed) res = await send(path, body, renewed)
+  }
+
   if (!res.ok) {
     const text = await res.text()
     console.error(`[AWS] ${res.status} ${url}`, text)
@@ -186,7 +215,7 @@ class StorageBucket {
   ): Promise<{ data: { path: string } | null; error: { message: string } | null }> {
     try {
       const contentType = opts?.contentType ?? file.type
-      const { uploadUrl } = await callApi<{ uploadUrl: string }>(
+      const { uploadUrl, key } = await callApi<{ uploadUrl: string; key?: string }>(
         '/storage/upload-url',
         { bucket: this.bucket, key: path, contentType }
       )
@@ -195,7 +224,9 @@ class StorageBucket {
         body: file,
         headers: { 'Content-Type': contentType },
       })
-      return { data: { path }, error: null }
+      // The server pins uploads under the caller's own prefix, so the stored
+      // path is the one it returns rather than the one we asked for.
+      return { data: { path: key ?? path }, error: null }
     } catch (err) {
       return { data: null, error: { message: String(err) } }
     }

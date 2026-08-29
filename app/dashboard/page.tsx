@@ -33,21 +33,19 @@ export default function HomePage() {
 
   useEffect(() => {
     const loadData = async () => {
-      const phone = localStorage.getItem("rakashi_phone")
-      if (!phone) return
-
+      // No phone number is sent any more. The API resolves the caller from the
+      // token and scopes the query to their own row, so asking for the profile
+      // is enough - and asking for someone else's is no longer possible.
       const { data: profile } = await supabase
         .from("driver_profiles")
         .select("*")
-        .eq("phone_number", phone)
         .single()
 
       if (!profile) return
       setDriverProfile(profile)
 
-      // Store driverId and name for tracking page and fallback
+      // Only the row id is cached; the name is personal data and stays in state.
       if (profile.id) localStorage.setItem("driverId", profile.id)
-      if (profile.name) localStorage.setItem("driverName", profile.name)
 
       // Fetch today's deliveries
       const todayStart = new Date()
@@ -75,26 +73,19 @@ export default function HomePage() {
     loadData()
   }, [])
 
-  // ── driverId フォールバック（phone での取得が失敗した場合）────────────────
+  // ── driverId フォールバック ────────────────────────────────────────────────
   useEffect(() => {
     const fetchDriverProfile = async () => {
       if (driverProfile) return  // 既に取得済みならスキップ
-      const driverId = localStorage.getItem('driverId')
-      if (!driverId) return
 
       const { data } = await supabase
         .from('driver_profiles')
         .select('name, trust_score, total_deliveries, experience_years, vehicle_type, id')
-        .eq('id', driverId)
         .single()
 
-      if (data) {
-        setDriverProfile(data)
-        localStorage.setItem('driverName', data.name)
-      } else {
-        const savedName = localStorage.getItem('driverName')
-        if (savedName) setDriverProfile((prev: any) => prev ?? { name: savedName, trust_score: 10 })
-      }
+      // The cached name fallback is gone with the localStorage copy; an empty
+      // result now just leaves the card in its loading state.
+      if (data) setDriverProfile(data)
     }
     fetchDriverProfile()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,15 +113,14 @@ export default function HomePage() {
 
   // ── Supabase Realtime: watch request_notifications ───────────────────────────
   useEffect(() => {
-    const driverId = localStorage.getItem('driverId') || 'demo'
-
+    // The poll is scoped to the caller by the API; sending a driver_id filter
+    // here would add nothing and previously sent the literal 'demo'.
     const subscription = supabase
       .channel('new_requests')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'request_notifications',
-        filter: `driver_id=eq.${driverId}`,
       }, async (payload: any) => {
         const { data: request } = await supabase
           .from('delivery_requests')
@@ -158,12 +148,9 @@ export default function HomePage() {
         const subscriptionJson = await requestNotificationPermission()
         if (!subscriptionJson) return
 
-        const driverId = localStorage.getItem('driverId') || 'demo'
-
         await supabase
           .from('driver_profiles')
           .update({ fcm_token: subscriptionJson })
-          .eq('id', driverId)
 
         localStorage.setItem('pushSubscription', subscriptionJson)
 
@@ -190,12 +177,10 @@ export default function HomePage() {
           clearInterval(timer)
           const req = incomingRequestRef.current
           if (req) {
-            const driverId = localStorage.getItem('driverId') || 'demo'
             supabase
               .from('request_notifications')
               .update({ status: 'rejected', responded_at: new Date().toISOString() })
               .eq('request_id', req.id)
-              .eq('driver_id', driverId)
               .then(() => {})
           }
           setShowRequestModal(false)
@@ -212,12 +197,12 @@ export default function HomePage() {
   // ── Accept handler ───────────────────────────────────────────────────────────
   const handleAcceptRequest = async () => {
     if (!incomingRequest) return
-    const driverId = localStorage.getItem('driverId') || 'demo'
-
+    // driver_id is still sent so the API knows this is an assignment, but the
+    // value it stores is the caller's own - a job cannot be assigned elsewhere.
     await supabase
       .from('delivery_requests')
       .update({
-        driver_id: driverId,
+        driver_id: localStorage.getItem('driverId'),
         status: 'accepted',
         accepted_at: new Date().toISOString(),
       })
@@ -227,7 +212,6 @@ export default function HomePage() {
       .from('request_notifications')
       .update({ status: 'accepted', responded_at: new Date().toISOString() })
       .eq('request_id', incomingRequest.id)
-      .eq('driver_id', driverId)
 
     localStorage.setItem('currentRequestId', incomingRequest.id)
     localStorage.setItem('pickupLat', incomingRequest.pickup_lat ?? '')
@@ -246,13 +230,10 @@ export default function HomePage() {
   // ── Reject handler ───────────────────────────────────────────────────────────
   const handleRejectRequest = async () => {
     if (!incomingRequest) return
-    const driverId = localStorage.getItem('driverId') || 'demo'
-
     await supabase
       .from('request_notifications')
       .update({ status: 'rejected', responded_at: new Date().toISOString() })
       .eq('request_id', incomingRequest.id)
-      .eq('driver_id', driverId)
 
     setShowRequestModal(false)
     setIncomingRequest(null)

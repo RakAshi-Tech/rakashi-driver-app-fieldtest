@@ -164,8 +164,8 @@ function OnboardingInner() {
     } catch (error) {
       console.error("handleSave error:", error)
     } finally {
-      // 認証Cookieをセットしてダッシュボードへ
-      document.cookie = "rakashi-auth=1; path=/; max-age=86400"
+      // The rakashi-auth cookie this used to set granted access on its own and
+      // has been removed everywhere. Sessions now come from Cognito via /login.
       router.push("/dashboard")
     }
   }

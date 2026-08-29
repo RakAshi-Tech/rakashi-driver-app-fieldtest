@@ -10,6 +10,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["handler.ts"],
+  "include": ["handler.ts", "guard.ts", "identity.ts", "policy.ts"],
   "exclude": ["node_modules", "dist"]
 }

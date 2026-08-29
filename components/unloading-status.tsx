@@ -131,7 +131,6 @@ export function UnloadingStatus() {
       const durationMin = Math.round(
         (now.getTime() - new Date(startedAt).getTime()) / 60000
       );
-      const driverId = localStorage.getItem('driverId') || 'demo';
       const today = now.toISOString().split('T')[0];
 
       await supabase
@@ -146,10 +145,11 @@ export function UnloadingStatus() {
         })
         .eq('id', deliveryId);
 
+      // Reads and writes are scoped to the caller by the API, so the driver_id
+      // filter is redundant here and the 'demo' placeholder it used is gone.
       const { data: existingShift } = await supabase
         .from('driver_shifts')
         .select('*')
-        .eq('driver_id', driverId)
         .eq('shift_date', today)
         .single();
 
@@ -165,7 +165,6 @@ export function UnloadingStatus() {
           .eq('id', existingShift.id);
       } else {
         await supabase.from('driver_shifts').insert({
-          driver_id: driverId,
           shift_date: today,
           start_time: new Date(startedAt).toISOString(),
           end_time: now.toISOString(),
@@ -175,21 +174,11 @@ export function UnloadingStatus() {
         });
       }
 
-      const { data: profile } = await supabase
-        .from('driver_profiles')
-        .select('total_deliveries, trust_score, total_earnings_inr')
-        .eq('id', driverId)
-        .single();
-
-      if (profile) {
-        await supabase
-          .from('driver_profiles')
-          .update({
-            total_deliveries: (profile.total_deliveries || 0) + 1,
-            total_earnings_inr: (profile.total_earnings_inr || 0) + earningsInr,
-          })
-          .eq('id', driverId);
-      }
+      // The lifetime totals on driver_profiles used to be incremented from here.
+      // They are earnings and reputation figures, so the API no longer accepts
+      // them from a client - a driver could otherwise post any number they liked.
+      // The per-shift totals written above are unaffected; recomputing the
+      // profile aggregates server-side is a Phase 2 task.
 
       localStorage.removeItem('currentDeliveryId');
       localStorage.removeItem('deliveryStartedAt');

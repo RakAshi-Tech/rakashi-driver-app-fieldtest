@@ -33,6 +33,19 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Pool } from 'pg'
+import type { Caller } from './identity'
+import { AuthError, readClaims, resolveCaller, forgetCachedDriver } from './identity'
+import {
+  applyOwnership,
+  assertUpsertConflict,
+  assertViaParentOwned,
+  mergeWhere,
+  ownershipPredicate,
+  requirePolicy,
+  requireDriverId,
+  safeUploadKey,
+  sanitizeData,
+} from './guard'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -162,7 +175,7 @@ interface QueryPayload {
   limit?: number
 }
 
-async function handleQuery(payload: QueryPayload): Promise<object> {
+async function handleQuery(payload: QueryPayload, caller: Caller): Promise<object> {
   const {
     table, operation, columns, filters = [],
     data, onConflict, single, orderBy, countExact, headOnly, limit,
@@ -172,13 +185,21 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid table name' }) }
   }
 
+  // Default deny: unless policy.ts lists this table AND this operation, stop here.
+  const policy = requirePolicy(table, operation)
+
   const db = await getPool()
   const params: unknown[] = []
 
   // ── SELECT ────────────────────────────────────────────────────────────────
   if (operation === 'select') {
+    // A table with no ownership column would leak every driver's rows, so reads
+    // are refused outright rather than returned unscoped.
+    if (policy.ownership === 'unowned') throw new AuthError(403, 'Forbidden')
+
     const selectExpr = countExact ? 'COUNT(*) AS count' : parseColumns(columns ?? '*')
-    const where = buildWhere(filters, params)
+    const clientWhere = buildWhere(filters, params)
+    const where = mergeWhere(clientWhere, ownershipPredicate(policy, caller, params))
     const order = orderBy
       ? `ORDER BY ${col(orderBy.column)} ${orderBy.ascending ? 'ASC' : 'DESC'}`
       : ''
@@ -198,9 +219,12 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
 
   // ── INSERT ────────────────────────────────────────────────────────────────
   if (operation === 'insert') {
-    if (!data) return { statusCode: 400, body: JSON.stringify({ error: 'No data' }) }
-    const keys = Object.keys(data)
-    const values = Object.values(data)
+    const clean = applyOwnership(table, policy, caller, sanitizeData(policy, data))
+    await assertViaParentOwned(db, policy, caller, clean)
+
+    const keys = Object.keys(clean)
+    if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
+    const values = Object.values(clean)
     const placeholders = values.map((_, i) => `$${i + 1}`)
 
     params.push(...values)
@@ -213,38 +237,54 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
 
   // ── UPSERT ────────────────────────────────────────────────────────────────
   if (operation === 'upsert') {
-    if (!data || !onConflict) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'upsert requires data and onConflict' }) }
-    }
-    const keys = Object.keys(data)
-    const values = Object.values(data)
+    // Only the conflict keys named in policy are accepted. Upserting on
+    // phone_number used to let any caller overwrite the profile holding that
+    // number; cognito_sub comes from the token and identifies only the caller.
+    const conflictKey = assertUpsertConflict(policy, onConflict)
+    const clean = applyOwnership(table, policy, caller, sanitizeData(policy, data))
+
+    const keys = Object.keys(clean)
+    if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
+    const values = Object.values(clean)
     const placeholders = values.map((_, i) => `$${i + 1}`)
 
     // Non-conflict columns use EXCLUDED for the DO UPDATE SET clause
-    const updateCols = keys.filter(k => k !== onConflict)
+    const updateCols = keys.filter(k => k !== conflictKey)
     const updateSet = updateCols.map(k => `${col(k)} = EXCLUDED.${col(k)}`).join(', ')
 
     params.push(...values)
     const returning = columns ? `RETURNING ${parseColumns(columns)}` : 'RETURNING *'
     const sql = [
       `INSERT INTO "${table}" (${keys.map(col).join(', ')}) VALUES (${placeholders.join(', ')})`,
-      `ON CONFLICT (${col(onConflict)}) DO UPDATE SET ${updateSet}`,
+      `ON CONFLICT (${col(conflictKey)}) DO UPDATE SET ${updateSet}`,
       returning,
     ].join(' ')
 
     const result = await db.query(sql, params)
+    // A first upsert creates this caller's profile, so the cached "no profile
+    // yet" answer has to go.
+    forgetCachedDriver(caller.sub)
     const responseData = single ? (result.rows[0] ?? null) : result.rows
     return ok({ data: responseData, error: null })
   }
 
   // ── UPDATE ────────────────────────────────────────────────────────────────
   if (operation === 'update') {
-    if (!data) return { statusCode: 400, body: JSON.stringify({ error: 'No data' }) }
-    const setClauses = Object.entries(data).map(([k, v]) => {
-      params.push(v)
+    const clean = sanitizeData(policy, data)
+    // Accepting an open job assigns it to the caller. The value is taken from
+    // the token, so a driver cannot hand a job to someone else - or take one.
+    if (policy.ownership === 'own_or_unassigned' && data?.[policy.ownerColumn!] !== undefined) {
+      clean[policy.ownerColumn!] = requireDriverId(caller)
+    }
+    const keys = Object.keys(clean)
+    if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
+
+    const setClauses = keys.map((k) => {
+      params.push(clean[k])
       return `${col(k)} = $${params.length}`
     })
-    const where = buildWhere(filters, params)
+    const clientWhere = buildWhere(filters, params)
+    const where = mergeWhere(clientWhere, ownershipPredicate(policy, caller, params))
     const sql = `UPDATE "${table}" SET ${setClauses.join(', ')} ${where}`.trim()
     await db.query(sql, params)
     return ok({ data: null, error: null })
@@ -255,7 +295,8 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
     if (!filters.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'delete requires at least one filter' }) }
     }
-    const where = buildWhere(filters, params)
+    const clientWhere = buildWhere(filters, params)
+    const where = mergeWhere(clientWhere, ownershipPredicate(policy, caller, params))
     const sql = `DELETE FROM "${table}" ${where}`.trim()
     await db.query(sql, params)
     return ok({ data: null, error: null })
@@ -266,36 +307,45 @@ async function handleQuery(payload: QueryPayload): Promise<object> {
 
 // ── Storage: pre-signed upload URL ───────────────────────────────────────────
 
-async function handleUploadUrl(body: {
-  bucket?: string
-  key: string
-  contentType: string
-}): Promise<object> {
+async function handleUploadUrl(
+  body: { bucket?: string; key: string; contentType: string },
+  caller: Caller
+): Promise<object> {
+  // The requested key is treated as a filename suggestion only; the caller's own
+  // prefix is prepended so nobody can sign a URL for another driver's objects.
+  const key = safeUploadKey(caller, body.key, body.contentType)
   const command = new PutObjectCommand({
     Bucket: S3_BUCKET,
-    Key: body.key,
+    Key: key,
     ContentType: body.contentType,
   })
   const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 })
-  return ok({ uploadUrl })
+  // `key` is returned because it may differ from what was asked for, and the
+  // client needs the real path to build the public URL.
+  return ok({ uploadUrl, key })
 }
 
 // ── Realtime: polling endpoint ────────────────────────────────────────────────
 
-async function handleRealtimePoll(body: {
-  table: string
-  filter?: string
-  since: string
-}): Promise<object> {
+async function handleRealtimePoll(
+  body: { table: string; filter?: string; since: string },
+  caller: Caller
+): Promise<object> {
   const { table, filter, since } = body
 
   if (!VALID_TABLES.has(table)) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid table' }) }
   }
 
+  // Polling is a read, so it goes through the same select policy and ownership
+  // rules. Without this it returned the 20 newest rows of any table to anyone.
+  const policy = requirePolicy(table, 'select')
+  if (policy.ownership === 'unowned') throw new AuthError(403, 'Forbidden')
+
   const db = await getPool()
   const params: unknown[] = [since]
   let sql = `SELECT * FROM "${table}" WHERE created_at > $1`
+  sql += ` AND ${ownershipPredicate(policy, caller, params)}`
 
   // Parse Supabase-style filter: "driver_id=eq.some-uuid"
   if (filter) {
@@ -331,7 +381,11 @@ export const handler = async (event: {
   path?: string
   rawPath?: string
   httpMethod?: string
-  requestContext?: { http?: { method?: string }; stage?: string }
+  requestContext?: {
+    http?: { method?: string }
+    stage?: string
+    authorizer?: { jwt?: { claims?: Record<string, unknown> } }
+  }
   body?: string | null
   queryStringParameters?: Record<string, string>
 }): Promise<{
@@ -360,18 +414,31 @@ export const handler = async (event: {
       ? (typeof event.body === 'string' ? JSON.parse(event.body) : event.body)
       : {}
 
+    // Identity is established once, from the JWT only, before any route runs.
+    // resolveCaller also links a pre-Cognito profile to its new account on first
+    // sign-in, so nothing downstream ever has to look at the request body to
+    // work out who is calling.
+    const claims = readClaims(event)
+    const caller = await resolveCaller(await getPool(), claims)
+
     if (path === '/query' && method === 'POST') {
-      result = await handleQuery(body as QueryPayload)
+      result = await handleQuery(body as QueryPayload, caller)
     } else if (path === '/storage/upload-url' && method === 'POST') {
-      result = await handleUploadUrl(body)
+      result = await handleUploadUrl(body, caller)
     } else if (path === '/realtime/poll' && method === 'POST') {
-      result = await handleRealtimePoll(body)
+      result = await handleRealtimePoll(body, caller)
     } else {
       result = err(404, `Not found: ${method} ${path}`)
     }
   } catch (e) {
-    console.error('Handler error:', e)
-    result = err(500, 'Internal server error')
+    if (e instanceof AuthError) {
+      // Deliberately terse: telling a caller whether a row exists but belongs to
+      // someone else is itself a disclosure.
+      result = err(e.statusCode, e.message)
+    } else {
+      console.error('Handler error:', e)
+      result = err(500, 'Internal server error')
+    }
   }
 
   const { statusCode, body } = result as { statusCode: number; body: string }
