@@ -138,8 +138,25 @@ of unlinked rows is still allowed.
 psql "$DATABASE_URL" -f infra/migrations/001_add_cognito_sub.sql
 ```
 
-The RDS instance is not publicly reachable, so run this from inside the VPC (a
-bastion, or a one-off Lambda/ECS task on the same subnets).
+The RDS instance is not publicly reachable and there is no bastion or
+SSM-managed host, so the statements have to originate inside the VPC.
+`run-migration.sh` does that: it creates a throwaway Lambda on the same subnets
+and security group as the API Lambda, runs the migration, verifies the result and
+deletes the function again.
+
+```bash
+bash infra/run-migration.sh
+```
+
+It takes its database credentials from the existing API Lambda's environment at
+run time - nothing is hardcoded here or written to the repo - and prints counts
+and the index definition only, never row data. `--verify` runs the checks without
+applying anything. Requires `cd lambda && npm run build` to have been run, since
+the runner borrows the `pg` driver from `lambda/dist/node_modules`.
+
+The checks it asserts: the `cognito_sub` column exists, the unique index exists
+and is *not* partial, `driver_profiles` still holds 2 rows, and 0 of them have a
+non-NULL `cognito_sub`.
 
 ## 4. Deploy the Lambda
 

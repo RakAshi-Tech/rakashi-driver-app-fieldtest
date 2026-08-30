@@ -44,3 +44,6 @@ next-env.d.ts
 
 # supabase CLI scratch state
 supabase/.temp/
+
+# python bytecode
+__pycache__/
