@@ -373,10 +373,9 @@ const handler = async (event) => {
         const body = event.body
             ? (typeof event.body === 'string' ? JSON.parse(event.body) : event.body)
             : {};
-        // Identity is established once, from the JWT only, before any route runs.
-        // resolveCaller also links a pre-Cognito profile to its new account on first
-        // sign-in, so nothing downstream ever has to look at the request body to
-        // work out who is calling.
+        // Identity is established once, from the JWT only, before any route runs,
+        // so nothing downstream ever has to look at the request body to work out who
+        // is calling.
         const claims = (0, identity_1.readClaims)(event);
         const db = await getPool();
         const caller = await (0, identity_1.resolveCaller)(db, claims);

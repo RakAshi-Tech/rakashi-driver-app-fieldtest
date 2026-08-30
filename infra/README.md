@@ -233,31 +233,35 @@ arrive without claims. Reopening the routes does not undo step 0; the extra
 allowed CORS header is harmless either way, and `infra/api-cors.rollback.json`
 restores the original list if it ever needs to be.
 
-### Before the cutover: check how the pre-Cognito numbers are stored
+---
 
-`identity.ts` links a driver to their existing profile by matching the phone
-number in their token against `driver_profiles.phone_number`. Cognito always
-hands it over in E.164 (`+91XXXXXXXXXX`); the profiles that predate Cognito hold
-whatever the old onboarding screen stored. A driver whose row does not match is
-not shown an error - they are treated as new, get a second empty profile, and
-their deliveries, earnings and score stay stranded on the old row.
+## Phone numbers, and the two rows already in the table
 
-A count-only probe of the two existing rows (no personal data read) placed their
-digits outside the `+91[6-9]XXXXXXXXX` range, so `phoneVariants()` in
-`identity.ts` also matches the bare ten-digit local form and the `91`/`0`
-prefixes. Confirm the shape from inside the VPC before the cutover - this returns
-counts only:
+There is no migration of existing users, because there are no existing users.
+The two rows in `driver_profiles` are development test data. They keep a NULL
+`cognito_sub` after step 3 and are simply unreachable: every caller is resolved
+by `cognito_sub` alone, so a row that carries none belongs to nobody and is
+returned to nobody. Nothing needs to be done to them, and this deployment does
+not touch them.
 
-```sql
-SELECT COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE phone_number ~ '^\+91[6-9][0-9]{9}$') AS e164,
-       COUNT(*) FILTER (WHERE phone_number ~ '^[6-9][0-9]{9}$')        AS bare_local,
-       COUNT(*) FILTER (WHERE phone_number ~ '^91[6-9][0-9]{9}$')      AS cc_no_plus
-  FROM driver_profiles;
-```
+Numbers are held in exactly one shape, E.164 `+91XXXXXXXXXX`, and the server is
+what puts them in it:
 
-If every row lands in one of those three columns, the link will work as written.
-Anything left over needs its format handled before step 5, not after.
+1. `toE164India()` in `lib/phone.ts` normalises what the driver typed, in the
+   route handler, before Cognito ever sees it. Ten local digits, or the same
+   number carrying `+91`, `91` or a leading `0`, all converge on one string.
+2. Cognito stores that as the user's `phone_number` and validates it as E.164.
+3. The pre token generation trigger copies the pool's own attribute into the
+   access token, so the value the API sees is signed rather than submitted.
+4. `identity.ts` re-checks the claim against `/^\+[1-9]\d{7,14}$/` and the
+   handler stamps it onto the profile. A number that fails the check is not
+   stored at all.
+
+There is deliberately no code that adopts an existing profile by phone number.
+Phase 1 confirms accounts without proving phone ownership - the pre-signup
+trigger sets `autoConfirmUser` but not `autoVerifyPhone` - so a lookup by number
+would let anyone who can register a number take over whatever profile carried
+it. A profile is only ever created by its own owner, keyed on `cognito_sub`.
 
 ---
 

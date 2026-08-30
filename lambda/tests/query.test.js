@@ -247,6 +247,34 @@ test('the profile upsert conflicts on cognito_sub with no index predicate', asyn
   assert.ok(!up.sql.includes('trust_score'))
 })
 
+test('a brand-new Cognito user creates their own profile in E.164', async () => {
+  // The state right after registration: a token, but no driver row yet.
+  const newcomer = { sub: 'cognito-sub-new', phoneNumber: '+919876543210', driverId: null }
+  const db = fakeDb(() => [{ id: 'new-driver-1' }])
+
+  const res = await handleQuery(
+    {
+      table: 'driver_profiles',
+      operation: 'upsert',
+      onConflict: 'cognito_sub',
+      data: { name: 'New Driver', vehicle_type: 'E-Rickshaw', experience_years: 2 },
+      columns: 'id',
+      single: true,
+    },
+    newcomer,
+    db
+  )
+
+  assert.equal(body(res).data.id, 'new-driver-1')
+  const ins = stmt(db, 'INSERT INTO "driver_profiles"')
+  // Identity and phone number are stamped by the server, in E.164, from the token.
+  assert.ok(ins.sql.includes('"cognito_sub"'))
+  assert.ok(ins.params.includes('cognito-sub-new'))
+  assert.ok(ins.params.includes('+919876543210'))
+  // A caller with no profile can still create one; nothing here needs driverId.
+  assert.ok(!ins.params.includes(null))
+})
+
 test('the profile upsert refuses phone_number as a conflict target', async () => {
   const db = fakeDb()
   await assert.rejects(

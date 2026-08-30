@@ -1,10 +1,11 @@
 -- ============================================================
 --  Phase 1 auth: link driver_profiles to Cognito users
 --
---  Additive only. No existing row is read, updated or deleted by this script;
---  the two profiles that predate Cognito keep every value they have and simply
---  gain a NULL cognito_sub, which the Lambda fills in when that driver first
---  signs in with the phone number already on their row.
+--  Additive only. No existing row is read, updated or deleted by this script.
+--  Rows that predate this column simply gain a NULL cognito_sub and stay
+--  unreachable from the API, which resolves every caller by cognito_sub alone.
+--  The two rows currently in the table are development test data and are left
+--  exactly as they are.
 -- ============================================================
 
 BEGIN;
@@ -16,7 +17,7 @@ ALTER TABLE driver_profiles
 --
 -- PostgreSQL never treats two NULLs as equal in a unique index (NULLS DISTINCT
 -- is the default), so this already permits any number of unlinked rows - the
--- two pre-Cognito profiles included - while still guaranteeing that one Cognito
+-- existing unlinked rows included - while still guaranteeing that one Cognito
 -- subject maps to at most one profile. It is deliberately NOT declared
 -- `WHERE cognito_sub IS NOT NULL`: `ON CONFLICT (cognito_sub)`, which the
 -- profile upsert depends on, can only infer a PARTIAL index when the statement

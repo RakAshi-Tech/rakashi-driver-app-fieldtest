@@ -1,7 +1,8 @@
 /**
- * Phone numbers reach Cognito in E.164, and the same string is what links a
- * Cognito user to their existing driver_profiles row - the two existing profiles
- * are both stored as +91XXXXXXXXXX. Normalising in one place keeps those in step.
+ * Phone numbers are normalised to E.164 here, on the server, before they reach
+ * Cognito - and Cognito's own copy is what the API later stores on the profile.
+ * Normalising in exactly one place is what makes "+91XXXXXXXXXX" the single
+ * shape a number is ever held in, from sign-up through to the database.
  */
 
 /** Accepts 10 local digits, or the same number already carrying +91 / 91 / 0. */

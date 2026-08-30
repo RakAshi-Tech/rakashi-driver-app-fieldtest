@@ -13,7 +13,6 @@ const {
   sanitizeData,
   serverSetClauses,
 } = require('../dist/guard.js')
-const { phoneVariants } = require('../dist/identity.js')
 const { caller, CALLER_ID, OTHER_ID } = require('./helpers.js')
 
 // ── Server-owned columns are not writable from a client ──────────────────────
@@ -131,16 +130,4 @@ test('upload keys are pinned under the caller prefix', () => {
     `drivers/${CALLER_ID}/secret.jpg`
   )
   assert.throws(() => safeUploadKey(caller, 'x.sh', 'application/x-sh'), { statusCode: 400 })
-})
-
-// ── Existing-profile linking tolerates pre-E.164 storage ─────────────────────
-
-test('phoneVariants covers the pre-Cognito storage forms', () => {
-  assert.deepEqual(phoneVariants('+919876543210'), [
-    '+919876543210',
-    '9876543210',
-    '919876543210',
-    '09876543210',
-  ])
-  assert.deepEqual(phoneVariants('+15551234567'), ['+15551234567'])
 })

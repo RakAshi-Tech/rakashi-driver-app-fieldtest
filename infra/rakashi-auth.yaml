@@ -77,10 +77,12 @@ Resources:
   # Pre token generation trigger
   #
   # The API is authorized with access tokens, and a Cognito access token carries
-  # no phone_number. The backend needs one it can trust: it is the key that links
-  # a driver to their existing driver_profiles row, and the value stored on a new
-  # profile. Taking it from the request body would mean trusting the client with
-  # exactly the identifier this whole phase exists to protect.
+  # no phone_number. The backend needs one it can trust: it is what gets stored on
+  # a new driver_profiles row. Taking it from the request body would mean trusting
+  # the client with exactly the identifier this whole phase exists to protect.
+  #
+  # Identity itself comes from `sub`, not from this claim - a profile is found and
+  # created by cognito_sub alone. The phone number is stored data, not a key.
   #
   # This trigger copies the pool's own phone_number attribute into the access
   # token, so the value arrives signed by Cognito and validated by API Gateway.

@@ -179,8 +179,8 @@ export default function LoginPage() {
         return
       }
 
-      // Existing account: the profile row may already be there (including the
-      // two that predate Cognito, which the API links on this first call).
+      // Existing account: the profile row is already there unless registration
+      // was abandoned before the profile step, in which case resume it.
       const { data } = await supabase.from("driver_profiles").select("id, name").single()
       if (data?.name) {
         localStorage.setItem("driverId", data.id)

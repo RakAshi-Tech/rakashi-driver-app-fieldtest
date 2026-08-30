@@ -9,7 +9,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthError = void 0;
 exports.readClaims = readClaims;
-exports.phoneVariants = phoneVariants;
 exports.resolveCaller = resolveCaller;
 exports.forgetCachedDriver = forgetCachedDriver;
 class AuthError extends Error {
@@ -20,8 +19,16 @@ class AuthError extends Error {
     }
 }
 exports.AuthError = AuthError;
-/** Claiming is only needed until the pre-Cognito rows are linked. */
-const ALLOW_PHONE_CLAIM = process.env.ALLOW_PHONE_CLAIM !== 'false';
+/**
+ * E.164, which is the only shape a phone number is ever stored in.
+ *
+ * Cognito validates `phone_number` as E.164 at sign-up and the pre-token trigger
+ * copies that attribute verbatim, so a well-formed claim already satisfies this.
+ * Checking it here is what makes the invariant explicit rather than assumed: the
+ * value goes straight into driver_profiles.phone_number, and one malformed write
+ * would be enough to make the column stop meaning one thing.
+ */
+const E164 = /^\+[1-9]\d{7,14}$/;
 function readClaims(event) {
     const claims = event.requestContext?.authorizer?.jwt?.claims;
     // Reaching the handler without claims means the route is not wired to the
@@ -41,36 +48,13 @@ function readClaims(event) {
     }
     return parsed;
 }
-/**
- * The forms a pre-Cognito profile might hold the same number in.
- *
- * Cognito always hands us E.164 (+91XXXXXXXXXX), but the profiles that predate
- * it were written by a screen that stored whatever was typed, so a row may carry
- * the bare ten-digit local number, or 91/0 prefixes, instead. They are the same
- * person. Matching only the E.164 form leaves those drivers unlinked, and an
- * unlinked driver does not get an error - they get a second, empty profile, and
- * their deliveries, earnings and trust score stay stranded on the old row.
- *
- * A count-only probe of the two existing rows (no personal data read) put their
- * digits outside the +91[6-9]XXXXXXXXX range, so this is not hypothetical.
- *
- * Every variant is derived from the same ten digits, so two different numbers
- * can never produce an overlapping set, and the value still comes from the token
- * rather than from the request. The `cognito_sub IS NULL` condition on the claim
- * is unchanged and remains what stops a row being taken over.
- */
-function phoneVariants(e164) {
-    if (!e164.startsWith('+91'))
-        return [e164];
-    const local = e164.slice(3);
-    return [e164, local, `91${local}`, `0${local}`];
-}
 /** sub -> driverId, valid for the life of a warm container. */
 const driverIdCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 async function resolveCaller(db, claims) {
     const sub = claims.sub;
-    const phoneNumber = typeof claims.phone_number === 'string' ? claims.phone_number : null;
+    const claimed = claims.phone_number;
+    const phoneNumber = typeof claimed === 'string' && E164.test(claimed) ? claimed : null;
     const cached = driverIdCache.get(sub);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
         return { sub, phoneNumber, driverId: cached.driverId };
@@ -81,31 +65,24 @@ async function resolveCaller(db, claims) {
         driverIdCache.set(sub, { driverId, at: Date.now() });
         return { sub, phoneNumber, driverId };
     }
-    // No profile is linked to this Cognito user yet. Two possibilities: a driver
-    // who predates Cognito and whose row is waiting to be claimed, or a genuinely
-    // new signup that still has to create a profile.
-    if (ALLOW_PHONE_CLAIM && phoneNumber) {
-        // Conditional update: a row can only be claimed while it is unclaimed, so
-        // two users racing for the same number cannot both win, and an already-linked
-        // profile can never be taken over.
-        const claimed = await db.query(`UPDATE driver_profiles
-          SET cognito_sub = $1, updated_at = NOW()
-        WHERE phone_number = ANY($2::text[]) AND cognito_sub IS NULL
-      RETURNING id`, [sub, phoneVariants(phoneNumber)]);
-        if (claimed.rows[0]) {
-            const driverId = claimed.rows[0].id;
-            console.log('[auth] linked existing profile to cognito user');
-            driverIdCache.set(sub, { driverId, at: Date.now() });
-            return { sub, phoneNumber, driverId };
-        }
-        // The number exists but belongs to a different Cognito user. Refuse rather
-        // than quietly handing out a second profile for the same phone.
+    // This Cognito user has no profile yet, so they are on their way to creating
+    // one. There is deliberately no path here that adopts an existing row by phone
+    // number: Phase 1 does not verify phone ownership (the pre-signup trigger sets
+    // autoConfirmUser but not autoVerifyPhone), so anyone able to register a number
+    // could otherwise take over whatever profile happened to carry it. A profile
+    // is only ever created by its own owner, keyed on the cognito_sub in the token.
+    //
+    // phone_number carries a UNIQUE constraint, so a number already sitting on any
+    // other row - linked to another account or linked to nothing - would fail the
+    // upsert. Saying so plainly beats surfacing a constraint violation as a 500.
+    // `IS DISTINCT FROM` is what makes an unlinked row count: NULL is not this
+    // caller's sub either, and it occupies the number just as effectively.
+    if (phoneNumber) {
         const taken = await db.query(`SELECT 1 FROM driver_profiles
-        WHERE phone_number = ANY($1::text[])
-          AND cognito_sub IS NOT NULL AND cognito_sub <> $2
-        LIMIT 1`, [phoneVariants(phoneNumber), sub]);
+        WHERE phone_number = $1 AND cognito_sub IS DISTINCT FROM $2
+        LIMIT 1`, [phoneNumber, sub]);
         if (taken.rowCount) {
-            throw new AuthError(403, 'Phone number is linked to another account');
+            throw new AuthError(403, 'Phone number already belongs to another profile');
         }
     }
     return { sub, phoneNumber, driverId: null };
