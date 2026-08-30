@@ -55,11 +55,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Git Bash converts POSIX paths when it hands them to a native Windows program
+# as a bare argument, but not when they sit inside a file:// URI - the AWS CLI
+# then receives /tmp/... and cannot resolve it. Convert explicitly; on a POSIX
+# host cygpath is absent and this is a no-op.
+uri_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
 invoke() { # $1 = path to a JSON payload file
   local out="$WORK/out.json"
   aws lambda invoke --function-name "$TMP_FN" --region "$REGION" \
     --cli-binary-format raw-in-base64-out \
-    --payload "file://$1" "$out" >/dev/null
+    --payload "file://$(uri_path "$1")" "$out" >/dev/null
   cat "$out"
 }
 
@@ -94,9 +102,9 @@ aws lambda create-function \
   --handler index.handler \
   --role "$ROLE" \
   --vpc-config "SubnetIds=$SUBNETS,SecurityGroupIds=$SGS" \
-  --environment "file://$WORK/env.json" \
+  --environment "file://$(uri_path "$WORK/env.json")" \
   --timeout 60 --memory-size 512 \
-  --zip-file "fileb://$WORK/runner.zip" \
+  --zip-file "fileb://$(uri_path "$WORK/runner.zip")" \
   --region "$REGION" \
   --query '{Name:FunctionName,State:State}' --output json
 echo "waiting for the function to become active (VPC ENI setup takes a minute)..."
