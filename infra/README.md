@@ -46,6 +46,19 @@ aws apigatewayv2 get-api --api-id zjhgxrmv5i --region ap-northeast-1 \
 in a header, and the only cookie in the design is the refresh cookie, which is
 same-origin to the Next.js route handlers and never sent to this API.
 
+`x-api-key` stays in the list for now, even though nothing in Phase 1 sends it.
+The frontend currently in production is the pre-Phase-1 build, and it does send
+that header on every call; removing it here would fail its preflight and take the
+running app down before its replacement is deployed in step 2. Once the Phase 1
+frontend is live and confirmed, drop it:
+
+```bash
+aws apigatewayv2 update-api --api-id zjhgxrmv5i --region ap-northeast-1   --cors-configuration file://infra/api-cors.final.json
+```
+
+That is cleanup, not a gate on the cutover - HTTP APIs never enforced the key, so
+allowing the header grants nothing.
+
 **Do this first.** While the routes are still `AuthorizationType: NONE` the extra
 allowed header changes nothing, so it is safe to apply well ahead of the cutover
 - and applying it afterwards would ship a window in which every call fails.
