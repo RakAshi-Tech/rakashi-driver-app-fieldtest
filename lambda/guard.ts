@@ -135,6 +135,50 @@ export async function assertViaParentOwned(
   if (!owned.rowCount) throw new AuthError(403, 'Forbidden')
 }
 
+/**
+ * Refuse a write that nothing scopes.
+ *
+ * A table with an ownership column is always narrowed by ownershipPredicate(),
+ * so the worst a missing filter can do there is touch the caller's own rows. An
+ * `unowned` table has no such predicate: an UPDATE that also carries no client
+ * filter becomes an unqualified `UPDATE <table> SET ...`, rewriting every row in
+ * the table for every driver. ocr_logs is the one table in that state today.
+ *
+ * Phase 2 gives ocr_logs a driver_id and it becomes a normal 'own' table; until
+ * then, requiring a filter is what keeps a single request from clobbering the
+ * whole scan history.
+ */
+export function assertScopedWrite(
+  policy: TablePolicy,
+  filters: { column: string }[] | undefined
+): void {
+  if (policy.ownership !== 'unowned') return
+  if (!filters?.length) throw new AuthError(400, 'A filter is required for this table')
+}
+
+/**
+ * SET fragments the server writes on its own, in addition to the sanitized
+ * client payload.
+ *
+ * The right-hand side is a column reference, evaluated by PostgreSQL against the
+ * row being updated. No client value reaches it, so nothing here can be forged
+ * by anything in the request.
+ */
+export function serverSetClauses(
+  table: string,
+  data: Record<string, unknown>
+): string[] {
+  // Settling a delivery pays the fare that was agreed when the job was created.
+  // final_fare_inr is money and is absent from `writable` for that reason: a
+  // driver must not be able to type in their own payout. Copying it from
+  // proposed_fare_inr keeps the completion flow working without trusting the
+  // browser with the number.
+  if (table === 'delivery_requests' && data.status === 'delivered') {
+    return ['"final_fare_inr" = "proposed_fare_inr"']
+  }
+  return []
+}
+
 export function assertUpsertConflict(policy: TablePolicy, onConflict: string | undefined): string {
   // Upserting on a client-chosen key is how a caller would overwrite someone
   // else's row, so only the keys named in policy are accepted.

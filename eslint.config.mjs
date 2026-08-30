@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Lambda is a separate CommonJS package with its own tsconfig, and is
+    // already excluded from the Next.js TypeScript build. Its compiled output
+    // and its Node test runner files are not Next.js app code.
+    "lambda/**",
   ]),
 ]);
 

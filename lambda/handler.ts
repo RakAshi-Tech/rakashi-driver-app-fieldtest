@@ -37,6 +37,7 @@ import type { Caller } from './identity'
 import { AuthError, readClaims, resolveCaller, forgetCachedDriver } from './identity'
 import {
   applyOwnership,
+  assertScopedWrite,
   assertUpsertConflict,
   assertViaParentOwned,
   mergeWhere,
@@ -45,6 +46,7 @@ import {
   requireDriverId,
   safeUploadKey,
   sanitizeData,
+  serverSetClauses,
 } from './guard'
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -154,9 +156,62 @@ function buildWhere(filters: Filter[], params: unknown[]): string {
   return `WHERE ${parts.join(' AND ')}`
 }
 
+/**
+ * Prepare a value for a bound parameter.
+ *
+ * node-postgres renders a JS array as a PostgreSQL array literal ({1,2}), which
+ * a jsonb column rejects. The only structured column in this schema is jsonb
+ * (gps_delivery_summary.route_coordinates), and there are no PostgreSQL array
+ * columns, so arrays and plain objects are bound as JSON text instead.
+ */
+function bindValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (value instanceof Date || Buffer.isBuffer(value)) return value
+  return JSON.stringify(value)
+}
+
 function parseColumns(columns: string): string {
   if (!columns || columns === '*') return '*'
   return columns.split(',').map(c => col(c.trim())).join(', ')
+}
+
+/**
+ * Recompute the caller's lifetime totals from their own delivery rows.
+ *
+ * total_deliveries and total_earnings_inr used to be incremented by the browser,
+ * which meant a driver could post any figures they liked. They are absent from
+ * `writable` now, so the only thing that can move them is this recount - and it
+ * counts nothing but rows already stamped with the caller's own driver_id.
+ *
+ * The caller can trigger the recount by completing a delivery. They cannot
+ * influence its result except by completing real deliveries of their own.
+ *
+ * Called after the delivery row is already committed, and deliberately not
+ * allowed to fail the request: a completed delivery must stay completed even if
+ * the aggregate refresh does not land.
+ */
+async function recomputeProfileTotals(db: Pool, caller: Caller): Promise<void> {
+  if (!caller.driverId) return
+  try {
+    await db.query(
+      `UPDATE driver_profiles p
+          SET total_deliveries = (
+                SELECT COUNT(*) FROM gps_delivery_summary
+                 WHERE driver_id = p.id AND completed_at IS NOT NULL),
+              total_earnings_inr = (
+                SELECT COALESCE(SUM(earnings_inr), 0) FROM gps_delivery_summary
+                 WHERE driver_id = p.id AND completed_at IS NOT NULL)
+        WHERE p.id = $1`,
+      [caller.driverId]
+    )
+  } catch (e) {
+    console.error('recomputeProfileTotals failed:', e)
+  }
+}
+
+/** True when this write is the moment a delivery becomes complete. */
+function completesDelivery(table: string, data: Record<string, unknown>): boolean {
+  return table === 'gps_delivery_summary' && Boolean(data.completed_at)
 }
 
 // ── Query handler ─────────────────────────────────────────────────────────────
@@ -175,7 +230,11 @@ interface QueryPayload {
   limit?: number
 }
 
-async function handleQuery(payload: QueryPayload, caller: Caller): Promise<object> {
+export async function handleQuery(
+  payload: QueryPayload,
+  caller: Caller,
+  db: Pool
+): Promise<object> {
   const {
     table, operation, columns, filters = [],
     data, onConflict, single, orderBy, countExact, headOnly, limit,
@@ -188,7 +247,6 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
   // Default deny: unless policy.ts lists this table AND this operation, stop here.
   const policy = requirePolicy(table, operation)
 
-  const db = await getPool()
   const params: unknown[] = []
 
   // ── SELECT ────────────────────────────────────────────────────────────────
@@ -224,13 +282,14 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
 
     const keys = Object.keys(clean)
     if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
-    const values = Object.values(clean)
+    const values = Object.values(clean).map(bindValue)
     const placeholders = values.map((_, i) => `$${i + 1}`)
 
     params.push(...values)
     const returning = columns ? `RETURNING ${parseColumns(columns)}` : 'RETURNING *'
     const sql = `INSERT INTO "${table}" (${keys.map(col).join(', ')}) VALUES (${placeholders.join(', ')}) ${returning}`
     const result = await db.query(sql, params)
+    if (completesDelivery(table, clean)) await recomputeProfileTotals(db, caller)
     const responseData = single ? (result.rows[0] ?? null) : result.rows
     return ok({ data: responseData, error: null })
   }
@@ -245,7 +304,7 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
 
     const keys = Object.keys(clean)
     if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
-    const values = Object.values(clean)
+    const values = Object.values(clean).map(bindValue)
     const placeholders = values.map((_, i) => `$${i + 1}`)
 
     // Non-conflict columns use EXCLUDED for the DO UPDATE SET clause
@@ -270,6 +329,10 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
 
   // ── UPDATE ────────────────────────────────────────────────────────────────
   if (operation === 'update') {
+    // An unowned table gets no ownership predicate, so without a client filter
+    // this would rewrite every row in the table.
+    assertScopedWrite(policy, filters)
+
     const clean = sanitizeData(policy, data)
     // Accepting an open job assigns it to the caller. The value is taken from
     // the token, so a driver cannot hand a job to someone else - or take one.
@@ -277,16 +340,23 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
       clean[policy.ownerColumn!] = requireDriverId(caller)
     }
     const keys = Object.keys(clean)
-    if (!keys.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
 
     const setClauses = keys.map((k) => {
-      params.push(clean[k])
+      params.push(bindValue(clean[k]))
       return `${col(k)} = $${params.length}`
     })
+    // Columns the server settles itself, appended after the client's own so a
+    // payload can never override them.
+    setClauses.push(...serverSetClauses(table, clean))
+    if (!setClauses.length) return { statusCode: 400, body: JSON.stringify({ error: 'No writable fields' }) }
+
     const clientWhere = buildWhere(filters, params)
     const where = mergeWhere(clientWhere, ownershipPredicate(policy, caller, params))
     const sql = `UPDATE "${table}" SET ${setClauses.join(', ')} ${where}`.trim()
     await db.query(sql, params)
+    // Completing a delivery is what moves the driver's lifetime totals, and the
+    // recount runs server-side because those columns are not client-writable.
+    if (completesDelivery(table, clean)) await recomputeProfileTotals(db, caller)
     return ok({ data: null, error: null })
   }
 
@@ -295,6 +365,7 @@ async function handleQuery(payload: QueryPayload, caller: Caller): Promise<objec
     if (!filters.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'delete requires at least one filter' }) }
     }
+    assertScopedWrite(policy, filters)
     const clientWhere = buildWhere(filters, params)
     const where = mergeWhere(clientWhere, ownershipPredicate(policy, caller, params))
     const sql = `DELETE FROM "${table}" ${where}`.trim()
@@ -327,9 +398,10 @@ async function handleUploadUrl(
 
 // ── Realtime: polling endpoint ────────────────────────────────────────────────
 
-async function handleRealtimePoll(
+export async function handleRealtimePoll(
   body: { table: string; filter?: string; since: string },
-  caller: Caller
+  caller: Caller,
+  db: Pool
 ): Promise<object> {
   const { table, filter, since } = body
 
@@ -342,7 +414,6 @@ async function handleRealtimePoll(
   const policy = requirePolicy(table, 'select')
   if (policy.ownership === 'unowned') throw new AuthError(403, 'Forbidden')
 
-  const db = await getPool()
   const params: unknown[] = [since]
   let sql = `SELECT * FROM "${table}" WHERE created_at > $1`
   sql += ` AND ${ownershipPredicate(policy, caller, params)}`
@@ -419,14 +490,15 @@ export const handler = async (event: {
     // sign-in, so nothing downstream ever has to look at the request body to
     // work out who is calling.
     const claims = readClaims(event)
-    const caller = await resolveCaller(await getPool(), claims)
+    const db = await getPool()
+    const caller = await resolveCaller(db, claims)
 
     if (path === '/query' && method === 'POST') {
-      result = await handleQuery(body as QueryPayload, caller)
+      result = await handleQuery(body as QueryPayload, caller, db)
     } else if (path === '/storage/upload-url' && method === 'POST') {
       result = await handleUploadUrl(body, caller)
     } else if (path === '/realtime/poll' && method === 'POST') {
-      result = await handleRealtimePoll(body, caller)
+      result = await handleRealtimePoll(body, caller, db)
     } else {
       result = err(404, `Not found: ${method} ${path}`)
     }

@@ -15,6 +15,50 @@ Region for every command: `ap-northeast-1`.
 
 ---
 
+## 0. Allow the Authorization header through CORS
+
+Phase 1 sends `Authorization: Bearer <access token>` on every API call. The app
+runs on Vercel and the API on `execute-api`, so those calls are cross-origin and
+the browser sends a preflight first. The API was created with
+`AllowHeaders: ["content-type", "x-api-key"]`, which does not list
+`authorization` - so the browser refuses every request before it leaves the page.
+Nothing reaches API Gateway or the Lambda, and nothing appears in any log.
+
+The desired configuration is version-controlled in `infra/api-cors.json`. This
+HTTP API predates CloudFormation and belongs to no stack, so it cannot be
+expressed as a template resource until the API is imported (a Phase 2 task);
+until then that file is the source of truth and the command below applies it.
+
+```bash
+aws apigatewayv2 update-api --api-id zjhgxrmv5i --region ap-northeast-1 \
+  --cors-configuration file://infra/api-cors.json
+```
+
+Verify:
+
+```bash
+aws apigatewayv2 get-api --api-id zjhgxrmv5i --region ap-northeast-1 \
+  --query 'CorsConfiguration.AllowHeaders'
+# expect ["content-type","authorization"]
+```
+
+`AllowOrigins` stays `*` and `AllowCredentials` stays `false`: the token travels
+in a header, and the only cookie in the design is the refresh cookie, which is
+same-origin to the Next.js route handlers and never sent to this API.
+
+**Do this first.** While the routes are still `AuthorizationType: NONE` the extra
+allowed header changes nothing, so it is safe to apply well ahead of the cutover
+- and applying it afterwards would ship a window in which every call fails.
+
+### Rollback
+
+```bash
+aws apigatewayv2 update-api --api-id zjhgxrmv5i --region ap-northeast-1 \
+  --cors-configuration file://infra/api-cors.rollback.json
+```
+
+---
+
 ## 1. Deploy the auth stack
 
 Creates a new Cognito user pool that signs in with a phone number, its app
@@ -66,8 +110,16 @@ both places. HTTP APIs never enforced it, and it shipped inside the client bundl
 
 ## 3. Database migration
 
-Adds a nullable `cognito_sub` column plus a partial unique index. It reads no
+Adds a nullable `cognito_sub` column plus a unique index on it. It reads no
 existing row and writes to none.
+
+The index is deliberately *not* partial. `ON CONFLICT (cognito_sub)`, which the
+profile upsert emits, can only infer a partial index when the statement repeats
+the index predicate - and it does not - so a `WHERE cognito_sub IS NOT NULL`
+index would make every profile upsert fail with `there is no unique or exclusion
+constraint matching the ON CONFLICT specification`. A plain unique index is
+equivalent here anyway: PostgreSQL never treats two NULLs as equal, so any number
+of unlinked rows is still allowed.
 
 ```bash
 psql "$DATABASE_URL" -f infra/migrations/001_add_cognito_sub.sql
@@ -78,11 +130,31 @@ bastion, or a one-off Lambda/ECS task on the same subnets).
 
 ## 4. Deploy the Lambda
 
+Run the tests first. They cover the ownership guard, the server-settled columns
+and the upsert/index pairing:
+
+```bash
+cd lambda && npm test
+```
+
 ```bash
 cd lambda && npm run deploy      # tsc -> dist -> lambda.zip
 aws lambda update-function-code \
   --function-name rakashi-driver-api \
   --zip-file fileb://lambda.zip --region ap-northeast-1
+```
+
+`npm run zip` deletes any previous `lambda.zip` before building a new one (`zip
+-r` appends to an existing archive, which would leave stale modules behind) and
+uses Python's `shutil.make_archive`. Windows PowerShell 5.1's `Compress-Archive`
+is not a substitute: it writes backslash path separators into the archive, which
+Lambda cannot unpack.
+
+Take a rollback point before overwriting the function:
+
+```bash
+aws lambda publish-version --function-name rakashi-driver-api \
+  --region ap-northeast-1 --query 'Version' --output text
 ```
 
 The new code requires a JWT on every request. Because the routes still send no
@@ -95,27 +167,57 @@ run them outside delivery hours.
 This is the step that closes the public API. Do it only after step 4 is live and
 the frontend is deployed.
 
+This API has exactly three routes and no `OPTIONS` or `$default` route, so
+attaching the authorizer cannot break CORS preflight - API Gateway answers
+preflight from the API-level CORS configuration without consulting an authorizer.
+
+Go one route at a time. The audience/scope pairing below is verified against the
+documentation but not against this pool until a real token has been through it,
+so prove it on the least-used route before closing the other two.
+
 ```bash
 API=zjhgxrmv5i
 AUTH=<AuthorizerId from step 1>
-for ROUTE in $(aws apigatewayv2 get-routes --api-id $API --region ap-northeast-1 \
-                 --query 'Items[].RouteId' --output text); do
-  aws apigatewayv2 update-route --api-id $API --route-id $ROUTE \
-    --authorization-type JWT --authorizer-id $AUTH \
-    --authorization-scopes aws.cognito.signin.user.admin \
-    --region ap-northeast-1
-done
+R=ap-northeast-1
+
+# Route ids: /query = mtqd6vi, /storage/upload-url = rfgzkf4, /realtime/poll = geoh502
+aws apigatewayv2 update-route --api-id $API --route-id geoh502 \
+  --authorization-type JWT --authorizer-id $AUTH \
+  --authorization-scopes aws.cognito.signin.user.admin --region $R
 ```
 
-Verify — an unauthenticated call must now be refused:
+Prove both halves on that one route before continuing - unauthenticated must be
+refused, and a real access token must be accepted:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -X POST \
-  https://$API.execute-api.ap-northeast-1.amazonaws.com/prod/query \
+  https://$API.execute-api.$R.amazonaws.com/prod/realtime/poll \
   -H 'Content-Type: application/json' \
-  -d '{"table":"driver_profiles","operation":"select","countExact":true}'
+  -d '{"table":"delivery_requests","since":"2026-01-01T00:00:00Z"}'
 # expect 401
+
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://$API.execute-api.$R.amazonaws.com/prod/realtime/poll \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"table":"delivery_requests","since":"2026-01-01T00:00:00Z"}'
+# expect 200
 ```
+
+Only then close the remaining two:
+
+```bash
+for ROUTE in mtqd6vi rfgzkf4; do
+  aws apigatewayv2 update-route --api-id $API --route-id $ROUTE \
+    --authorization-type JWT --authorizer-id $AUTH \
+    --authorization-scopes aws.cognito.signin.user.admin --region $R
+done
+```
+
+The scope is not decoration. Cognito ID tokens carry `aud` equal to the app
+client id, so the audience check alone would accept an ID token in place of an
+access token; an ID token has no `scope` claim, so requiring one rejects it.
+Amazon Cognito API sign-in issues exactly `aws.cognito.signin.user.admin`, which
+is why that is the value. `identity.ts` re-checks `token_use` as a second layer.
 
 ### Rollback
 
@@ -127,7 +229,35 @@ aws apigatewayv2 update-route --api-id $API --route-id <ROUTE_ID> \
 ```
 
 Roll the Lambda back alongside it, since the new code refuses requests that
-arrive without claims.
+arrive without claims. Reopening the routes does not undo step 0; the extra
+allowed CORS header is harmless either way, and `infra/api-cors.rollback.json`
+restores the original list if it ever needs to be.
+
+### Before the cutover: check how the pre-Cognito numbers are stored
+
+`identity.ts` links a driver to their existing profile by matching the phone
+number in their token against `driver_profiles.phone_number`. Cognito always
+hands it over in E.164 (`+91XXXXXXXXXX`); the profiles that predate Cognito hold
+whatever the old onboarding screen stored. A driver whose row does not match is
+not shown an error - they are treated as new, get a second empty profile, and
+their deliveries, earnings and score stay stranded on the old row.
+
+A count-only probe of the two existing rows (no personal data read) placed their
+digits outside the `+91[6-9]XXXXXXXXX` range, so `phoneVariants()` in
+`identity.ts` also matches the bare ten-digit local form and the `91`/`0`
+prefixes. Confirm the shape from inside the VPC before the cutover - this returns
+counts only:
+
+```sql
+SELECT COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE phone_number ~ '^\+91[6-9][0-9]{9}$') AS e164,
+       COUNT(*) FILTER (WHERE phone_number ~ '^[6-9][0-9]{9}$')        AS bare_local,
+       COUNT(*) FILTER (WHERE phone_number ~ '^91[6-9][0-9]{9}$')      AS cc_no_plus
+  FROM driver_profiles;
+```
+
+If every row lands in one of those three columns, the link will work as written.
+Anything left over needs its format handled before step 5, not after.
 
 ---
 
@@ -141,5 +271,14 @@ arrive without claims.
   an SNS sandbox exit; both are external processes, which is why Phase 1 does not
   depend on them.
 - Move the Lambda's DB credentials to Secrets Manager (needs a VPC interface
-  endpoint), give `ocr_logs` a `driver_id`, recompute profile totals server-side,
-  and import the API and Lambda into IaC.
+  endpoint), give `ocr_logs` a `driver_id` so its reads can be opened up and its
+  writes scoped by owner rather than by a required filter, and import the API and
+  Lambda into IaC.
+- `trust_score` still only ever holds its database default (10) or a value set by
+  operations staff: nothing recomputes it. The dashboard reads it, so the card
+  shows 10 for every new driver. Deciding the formula is a product question, not
+  a security one, and is deliberately left alone here.
+- `gps_delivery_summary.earnings_inr` is still typed in by the driver at
+  completion, so the recounted `total_earnings_inr` is only as trustworthy as
+  that entry. The server-settled figure is `delivery_requests.final_fare_inr`;
+  moving the profile total onto it is the follow-up.

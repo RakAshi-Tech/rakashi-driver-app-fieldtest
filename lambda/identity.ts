@@ -67,6 +67,30 @@ export function readClaims(event: {
   return parsed
 }
 
+/**
+ * The forms a pre-Cognito profile might hold the same number in.
+ *
+ * Cognito always hands us E.164 (+91XXXXXXXXXX), but the profiles that predate
+ * it were written by a screen that stored whatever was typed, so a row may carry
+ * the bare ten-digit local number, or 91/0 prefixes, instead. They are the same
+ * person. Matching only the E.164 form leaves those drivers unlinked, and an
+ * unlinked driver does not get an error - they get a second, empty profile, and
+ * their deliveries, earnings and trust score stay stranded on the old row.
+ *
+ * A count-only probe of the two existing rows (no personal data read) put their
+ * digits outside the +91[6-9]XXXXXXXXX range, so this is not hypothetical.
+ *
+ * Every variant is derived from the same ten digits, so two different numbers
+ * can never produce an overlapping set, and the value still comes from the token
+ * rather than from the request. The `cognito_sub IS NULL` condition on the claim
+ * is unchanged and remains what stops a row being taken over.
+ */
+export function phoneVariants(e164: string): string[] {
+  if (!e164.startsWith('+91')) return [e164]
+  const local = e164.slice(3)
+  return [e164, local, `91${local}`, `0${local}`]
+}
+
 /** sub -> driverId, valid for the life of a warm container. */
 const driverIdCache = new Map<string, { driverId: string; at: number }>()
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -101,9 +125,9 @@ export async function resolveCaller(db: Pool, claims: JwtClaims): Promise<Caller
     const claimed = await db.query<{ id: string }>(
       `UPDATE driver_profiles
           SET cognito_sub = $1, updated_at = NOW()
-        WHERE phone_number = $2 AND cognito_sub IS NULL
+        WHERE phone_number = ANY($2::text[]) AND cognito_sub IS NULL
       RETURNING id`,
-      [sub, phoneNumber]
+      [sub, phoneVariants(phoneNumber)]
     )
     if (claimed.rows[0]) {
       const driverId = claimed.rows[0].id
@@ -116,9 +140,10 @@ export async function resolveCaller(db: Pool, claims: JwtClaims): Promise<Caller
     // than quietly handing out a second profile for the same phone.
     const taken = await db.query(
       `SELECT 1 FROM driver_profiles
-        WHERE phone_number = $1 AND cognito_sub IS NOT NULL AND cognito_sub <> $2
+        WHERE phone_number = ANY($1::text[])
+          AND cognito_sub IS NOT NULL AND cognito_sub <> $2
         LIMIT 1`,
-      [phoneNumber, sub]
+      [phoneVariants(phoneNumber), sub]
     )
     if (taken.rowCount) {
       throw new AuthError(403, 'Phone number is linked to another account')

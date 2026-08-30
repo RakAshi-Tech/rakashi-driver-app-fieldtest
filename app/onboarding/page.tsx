@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Camera, CheckCircle2, User, ChevronLeft, Shield, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { supabase } from "@/lib/supabase"
 import { BrowserQRCodeReader } from "@zxing/library"
 
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
@@ -130,44 +129,25 @@ function OnboardingInner() {
     setPhotoPreview(URL.createObjectURL(file))
   }
 
-  // ── Save to Supabase ──
+  /**
+   * This screen no longer writes to the database.
+   *
+   * It used to upsert driver_profiles with `onConflict: "phone_number"`, keyed
+   * on a phone number taken from the query string. Under the Phase 1 policy that
+   * is refused outright - phone_number is not an accepted conflict target,
+   * because conflicting on it let any caller overwrite whichever profile held
+   * that number - and the request would carry no token to begin with, since
+   * nothing here signs the user in.
+   *
+   * Profile creation now lives in the authenticated step of /login, which
+   * upserts on the cognito_sub from the caller's own token. That is the single
+   * path, so this route hands over to it rather than keeping a second, unguarded
+   * writer alive. The form itself is left exactly as it was; the extra fields it
+   * collects are a Phase 2 item, to be re-added there once /login owns them.
+   */
   const handleSave = async () => {
     setSaving(true)
-    try {
-      // 認証チェックをスキップ（モック認証のため）
-      // phone_numberをキーにしてdriver_profilesに保存（idは自動生成）
-      const { error } = await supabase
-        .from("driver_profiles")
-        .upsert({
-          phone_number: phone ? `+91${phone}` : `test-${Date.now()}`,
-          name: name.trim(),
-          email: email.trim() || null,
-          city: city.trim(),
-          area: area.trim(),
-          pin_code: pinCode,
-          pan_number: pan,
-          aadhaar_last4: aadhaarLast4 || null,
-          date_of_birth: dob || null,
-          vehicle_type: "e-rickshaw",
-          trust_score: 50,
-          ...(vehicleCode ? { vehicle_code: vehicleCode } : {}),
-        }, {
-          onConflict: "phone_number",
-          ignoreDuplicates: false,
-        })
-
-      if (error) {
-        console.error("Save error details:", JSON.stringify(error))
-        console.error("Save error message:", error.message)
-        console.error("Save error code:", error.code)
-      }
-    } catch (error) {
-      console.error("handleSave error:", error)
-    } finally {
-      // The rakashi-auth cookie this used to set granted access on its own and
-      // has been removed everywhere. Sessions now come from Cognito via /login.
-      router.push("/dashboard")
-    }
+    router.push("/login")
   }
 
   // ── Step Indicator ──
@@ -182,7 +162,12 @@ function OnboardingInner() {
     />
   )
 
-  const maxDob = new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0]
+  // Computed once on mount rather than on every render: Date.now() during render
+  // is impure, and the latest permitted date of birth need not move while the
+  // form is open.
+  const [maxDob] = useState(
+    () => new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0]
+  )
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "#1A1A1A", color: "#F5F0E8" }}>

@@ -85,6 +85,10 @@ export const POLICIES: Record<string, TablePolicy> = {
     ownership: 'own_or_unassigned',
     ownerColumn: 'driver_id',
     operations: ['select', 'update'],
+    // final_fare_inr is deliberately absent: it is what the driver gets paid,
+    // and the browser must not be able to name that figure. The handler settles
+    // it server-side from proposed_fare_inr when the row reaches 'delivered'.
+    // See serverSetClauses() in guard.ts.
     writable: [
       'status',
       'accepted_at',
@@ -118,17 +122,30 @@ export const POLICIES: Record<string, TablePolicy> = {
     ],
   },
 
+  // The driver's own record of one delivery. Every column here is operational
+  // data about a run the caller made: where they went, how long it took, what
+  // the job paid. driver_id is absent on purpose - the handler stamps it from
+  // the token, so a caller can neither file a delivery against another driver
+  // nor read one back.
   gps_delivery_summary: {
     ownership: 'own',
     ownerColumn: 'driver_id',
     operations: ['select', 'insert', 'update'],
     writable: [
       'job_id',
+      'shift_date',
       'started_at',
       'completed_at',
       'total_distance_km',
+      'total_duration_min',
       'on_time',
+      'earnings_inr',
       'photo_url',
+      'route_coordinates',
+      'start_lat',
+      'start_lng',
+      'end_lat',
+      'end_lng',
       'delivery_address',
       'pickup_address',
     ],

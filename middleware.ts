@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 const PROTECTED_PATHS = [
   "/dashboard",
+  "/onboarding",
   "/ocr",
   "/job",
   "/tracking",
@@ -41,6 +42,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/onboarding/:path*",
     "/ocr/:path*",
     "/job/:path*",
     "/tracking/:path*",
