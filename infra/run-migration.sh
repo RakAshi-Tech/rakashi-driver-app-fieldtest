@@ -24,7 +24,8 @@ set -euo pipefail
 REGION=ap-northeast-1
 SRC_FN=rakashi-driver-api          # supplies the VPC config and DB credentials
 TMP_FN=rakashi-migration-runner    # created and deleted by this script
-MIGRATION=001_add_cognito_sub.sql
+# Override to run a different file, e.g. MIGRATION=002_clear_preview_number.sql
+MIGRATION="${MIGRATION:-001_add_cognito_sub.sql}"
 
 VERIFY_ONLY=0
 [ "${1:-}" = "--verify" ] && VERIFY_ONLY=1
