@@ -47,3 +47,6 @@ supabase/.temp/
 
 # python bytecode
 __pycache__/
+
+# rollback artifacts (Lambda zips, not source)
+rollback/
