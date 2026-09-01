@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
 import { AUTH_MODE, hasSession, login, register } from "@/lib/auth"
+import { withNoProfileAsNull, type DriverProfileSummary } from "@/lib/profile"
 
 type Screen = "phone" | "otp" | "password" | "profile"
 type VehicleType = "E-Rickshaw"
@@ -20,6 +21,17 @@ type LoginTab = "whatsapp" | "sms"
  * once SMS delivery to Indian numbers is cleared.
  */
 const USE_OTP = AUTH_MODE === "SMS_OTP"
+
+/**
+ * The caller's own profile, or null when the API says they are authenticated but
+ * have not registered one yet - a 403 carrying the guard's "No driver profile".
+ * Every other failure (401, a bare 403, 500, a network error) still throws, so
+ * only this one answer routes a driver to the profile screen.
+ */
+const loadProfileOrNull = (): Promise<DriverProfileSummary | null> =>
+  withNoProfileAsNull(() =>
+    supabase.from("driver_profiles").select("id, name").single()
+  )
 
 export default function LoginPage() {
   const router = useRouter()
@@ -78,13 +90,10 @@ export default function LoginPage() {
     ;(async () => {
       try {
         if (!(await hasSession())) return
-        const { data } = await supabase
-          .from("driver_profiles")
-          .select("id, name")
-          .single()
+        const profile = await loadProfileOrNull()
         if (cancelled) return
-        if (data?.name) {
-          localStorage.setItem("driverId", data.id)
+        if (profile?.name) {
+          localStorage.setItem("driverId", profile.id)
           router.replace("/dashboard")
           return
         }
@@ -181,9 +190,23 @@ export default function LoginPage() {
 
       // Existing account: the profile row is already there unless registration
       // was abandoned before the profile step, in which case resume it.
-      const { data } = await supabase.from("driver_profiles").select("id, name").single()
-      if (data?.name) {
-        localStorage.setItem("driverId", data.id)
+      let profile: DriverProfileSummary | null
+      try {
+        profile = await loadProfileOrNull()
+      } catch {
+        // Signed in, but the profile could not be read - an expired token, a
+        // policy refusal or an API fault. None of those mean "not registered",
+        // so the driver stays on this screen with something to act on.
+        setPasswordError(
+          lang === "en"
+            ? "Signed in, but your profile could not be loaded. Please try again."
+            : "साइन-इन हो गया, लेकिन प्रोफ़ाइल लोड नहीं हो सकी। कृपया फिर से प्रयास करें।"
+        )
+        return
+      }
+
+      if (profile?.name) {
+        localStorage.setItem("driverId", profile.id)
         router.push("/dashboard")
       } else {
         setScreen("profile")
