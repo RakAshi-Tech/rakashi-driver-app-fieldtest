@@ -239,8 +239,35 @@ That user exists in Cognito and has **no `driver_profiles` row yet**. That is
 the canary's starting state, and it is also why stages E-G expect a 403 rather
 than a 200 from a token minted for it.
 
-Stages E-G still need a token in hand. Take one from a browser session, or mint
-one from the CLI with an account you control:
+Stages E-G still need a token in hand. **No new phone number is needed for
+this.** `toE164India` is application code on the Next.js side; the AWS CLI talks
+to Cognito directly and never goes through it. So the Preview test user that
+already exists in the pool can re-issue an access token from its own username
+and password as often as the window needs:
+
+```bash
+CLIENT=2kgf163oc5gc9rto35f2tfa2da
+SECRET=$(aws cognito-idp describe-user-pool-client \
+  --user-pool-id ap-northeast-1_jeds8qN5R \
+  --client-id $CLIENT --region ap-northeast-1 \
+  --query 'UserPoolClient.ClientSecret' --output text)
+PHONE='+911234567890'   # the existing Preview test user, in E.164
+PASS='...'              # the password it was registered with
+
+SECRET_HASH=$(python -c "
+import hmac,hashlib,base64,sys
+print(base64.b64encode(hmac.new(sys.argv[3].encode(),(sys.argv[1]+sys.argv[2]).encode(),hashlib.sha256).digest()).decode())
+" "$PHONE" "$CLIENT" "$SECRET")
+
+TOKEN=$(aws cognito-idp initiate-auth --client-id $CLIENT \
+  --auth-flow USER_PASSWORD_AUTH \
+  --auth-parameters USERNAME="$PHONE",PASSWORD="$PASS",SECRET_HASH="$SECRET_HASH" \
+  --region ap-northeast-1 --query 'AuthenticationResult.AccessToken' --output text)
+```
+
+To create a *different* account for the window instead, sign up from the CLI.
+Cognito validates `phone_number` as E.164 and nothing narrower, so this too is
+independent of the Indian-mobile rule the app applies:
 
 ```bash
 POOL=ap-northeast-1_jeds8qN5R
@@ -268,9 +295,12 @@ TOKEN=$(aws cognito-idp initiate-auth --client-id $CLIENT \
 
 `$TOKEN` lives 15 minutes. Re-mint it rather than hurrying.
 
-`1234567890` is a **Preview-only** number. `toE164India` accepts it when
-`VERCEL_ENV === "preview"` and nowhere else, so Production and the CLI both need
-a real Indian mobile number.
+`1234567890` is a **Preview-only** number as far as the *app* is concerned:
+`toE164India` accepts it when `VERCEL_ENV === "preview"` and nowhere else, so
+**registering through the Production app needs a real Indian mobile number**
+(stage I). That rule does not change, and no Production exception may be added
+for a test number. It simply does not constrain the CLI, which never calls that
+function.
 
 ## P5. Release the Preview number from the legacy test row
 
@@ -278,12 +308,37 @@ One column of one dead test row. No impact on anything serving traffic, so it
 runs before the window rather than inside it - and it must, because the canary
 cannot pass without it.
 
-`infra/migrations/002_clear_preview_number.sql` sets `phone_number = NULL` on
-the single legacy row holding the Preview test number. The row is kept. The
-statement carries `cognito_sub IS NULL` in its own WHERE clause, so it cannot
-strip a number from a row belonging to a real account even if the table changes
-under it, and a `DO` block aborts the transaction unless the predicate matches
-exactly one row.
+> **Attempt 1 failed, safely, and the column is the reason.**
+>
+> The first version of migration 002 set `phone_number = NULL`. Postgres
+> refused it:
+>
+> ```
+> null value in column "phone_number" of relation "driver_profiles"
+> violates not-null constraint          (SQLSTATE 23502)
+> ```
+>
+> `driver_profiles.phone_number` is `TEXT NOT NULL UNIQUE` (`rds_schema.sql:16`),
+> so NULL was never available. The whole migration ran as one statement inside
+> `BEGIN ... COMMIT`, so the error aborted it and **nothing changed** - the four
+> counts after the attempt were identical to the four before.
+>
+> Do not fix this by dropping the constraint. `NOT NULL` is load-bearing for
+> Phase 1: it is what makes a missing `phone_number` claim fail profile creation
+> loudly instead of writing a profile nobody can be contacted through.
+
+`infra/migrations/002_clear_preview_number.sql` therefore *retires* the number
+rather than nulling it: it sets `phone_number = 'retired-' || id::text` on the
+single legacy row holding the Preview test number. That keeps both properties
+the plan wanted - the row survives, and the Preview number is released so
+`resolveCaller` stops finding a collision. The sentinel is unique by
+construction (`id` is the primary key), and it is not E.164, so `toE164India`
+can never produce it and no Cognito account can ever claim it.
+
+The statement carries `cognito_sub IS NULL` in its own WHERE clause, so it
+cannot touch a row belonging to a real account even if the table changes under
+it, and a `DO` block aborts the transaction unless the predicate matches exactly
+one row.
 
 **Before:** confirm the target is exactly one row. Counts only, no PII, and
 `/query` is still open at this point so no token is needed:
@@ -334,9 +389,17 @@ counts above are. Note also that those 001 invariants stop holding once the
 canary creates a row, so do not re-run this script after the canary and expect
 it to pass.
 
-**After:** the same four counts must now read target rows `0`, same number
-linked `0`, total `2`, phone_number IS NULL `1`. Total unchanged at 2 is the
-important one: the row was edited, not deleted.
+**After:** the first three counts must read target rows `0`, same number linked
+`0`, total `2`. Total unchanged at 2 is the important one: the row was edited,
+not deleted. The fourth check becomes an equality test on the sentinel, using
+the id the UPDATE returned:
+
+```bash
+RETIRED_ID=   # the id returned by migration 002
+count "[{\"column\":\"phone_number\",\"op\":\"eq\",\"value\":\"retired-$RETIRED_ID\"}]"
+```
+
+**Success:** `1`. `phone_number IS NULL` stays `0` - the column is `NOT NULL`.
 
 **Rollback.** Put the number back on the same row, by the id the UPDATE
 returned:
@@ -345,7 +408,7 @@ returned:
 UPDATE driver_profiles
    SET phone_number = '+911234567890'
  WHERE id = '<the id returned by 002>'
-   AND phone_number IS NULL
+   AND phone_number = 'retired-' || id::text
    AND cognito_sub IS NULL;
 ```
 

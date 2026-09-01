@@ -9,6 +9,17 @@
 --  Preview test account would meet that 403 at profile creation and the canary
 --  could never run. Releasing the number clears the collision.
 --
+--  Retired, not nulled. The first version of this migration set phone_number to
+--  NULL and Postgres refused it - the column is TEXT NOT NULL UNIQUE
+--  (rds_schema.sql:16). That constraint stays: it is what makes a missing
+--  phone_number claim fail profile creation loudly rather than writing a profile
+--  nobody can be contacted through. So the number is replaced with a sentinel
+--  instead, which releases it just as effectively.
+--
+--  'retired-' || id is unique by construction, since id is the primary key, and
+--  it is not E.164 - toE164India can never produce it, so no Cognito account can
+--  ever collide with it.
+--
 --  The row itself is kept. It is development data with no cognito_sub, so it
 --  stays unreachable through the API either way - `driver_profiles` is
 --  ownership: 'own' on `id`, resolved from the caller's cognito_sub alone - and
@@ -37,10 +48,10 @@ END $$;
 
 --  `cognito_sub IS NULL` is carried into the UPDATE itself rather than trusted
 --  from the check above: it is what makes it impossible for this statement to
---  strip the number from a row belonging to a real Cognito account.
+--  take the number from a row belonging to a real Cognito account.
 --  The returned id is the rollback target - record it.
 UPDATE driver_profiles
-   SET phone_number = NULL
+   SET phone_number = 'retired-' || id::text
  WHERE phone_number = '+911234567890'
    AND cognito_sub IS NULL
 RETURNING id;
