@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "build": "tsc --outDir dist",
-    "zip": "cd dist && zip -r ../lambda.zip .",
-    "deploy": "npm run build && npm run zip"
+    "zip": "node -e \"require('fs').rmSync('lambda.zip',{force:true})\" && python -c \"import shutil; shutil.make_archive('lambda','zip','dist')\"",
+    "deploy": "npm run build && npm run zip",
+    "test": "npm run build && node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.600.0",

@@ -33,11 +33,11 @@ export function ConfidenceBar() {
 
   useEffect(() => {
     const fetchArrivalCount = async () => {
-      const driverId = localStorage.getItem('driverId') || 'demo'
+      // driver_id filter dropped: the API scopes every read to the caller's own
+      // rows, and the old 'demo' fallback would now be sent as a UUID.
       const { count } = await supabase
         .from('gps_delivery_summary')
         .select('*', { count: 'exact', head: true })
-        .eq('driver_id', driverId)
         .not('completed_at', 'is', null)
       setArrivalCount(count ?? 0)
     }

@@ -41,3 +41,12 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# supabase CLI scratch state
+supabase/.temp/
+
+# python bytecode
+__pycache__/
+
+# rollback artifacts (Lambda zips, not source)
+rollback/

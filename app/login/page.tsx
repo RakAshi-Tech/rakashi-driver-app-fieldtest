@@ -2,36 +2,44 @@
 
 import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { MessageCircle, Camera, CheckCircle2, Truck, Phone } from "lucide-react"
+import { MessageCircle, Camera, CheckCircle2, Truck, Phone, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { useLang } from "@/app/context/LanguageContext"
 import { LangToggle } from "@/app/components/LangToggle"
+import { AUTH_MODE, hasSession, login, register } from "@/lib/auth"
+import { withNoProfileAsNull, type DriverProfileSummary } from "@/lib/profile"
 
-type Screen = "phone" | "otp" | "profile"
+type Screen = "phone" | "otp" | "password" | "profile"
 type VehicleType = "E-Rickshaw"
 type LoginTab = "whatsapp" | "sms"
 
-// TODO: Replace with real WhatsApp Business API
-async function sendWhatsAppOTP(phoneNumber: string): Promise<{ success: boolean; messageId: string }> {
-  await new Promise((resolve) => setTimeout(resolve, 800))
-  console.log("[WhatsApp OTP] Sending to:", phoneNumber)
-  return { success: true, messageId: "mock-" + Date.now() }
-}
+/**
+ * Phase 1 signs in with a password; the OTP screen below is kept intact and
+ * renders as soon as AUTH_MODE becomes "SMS_OTP", which is what Phase 2 flips
+ * once SMS delivery to Indian numbers is cleared.
+ */
+const USE_OTP = AUTH_MODE === "SMS_OTP"
 
-// TODO: Replace with real SMS API (Twilio/MSG91)
-async function sendSmsOTP(phoneNumber: string) {
-  await new Promise(resolve => setTimeout(resolve, 800))
-  console.log("[SMS OTP] Sending to:", phoneNumber)
-  return { success: true, messageId: 'sms-mock-' + Date.now() }
-}
+/**
+ * The caller's own profile, or null when the API says they are authenticated but
+ * have not registered one yet - a 403 carrying the guard's "No driver profile".
+ * Every other failure (401, a bare 403, 500, a network error) still throws, so
+ * only this one answer routes a driver to the profile screen.
+ */
+const loadProfileOrNull = (): Promise<DriverProfileSummary | null> =>
+  withNoProfileAsNull(() =>
+    supabase.from("driver_profiles").select("id, name").single()
+  )
 
 export default function LoginPage() {
   const router = useRouter()
   const { lang } = useLang()
   const [screen, setScreen] = useState<Screen>("phone")
-  const [loginTab, setLoginTab] = useState<LoginTab>("whatsapp")
+  // Without OTP there is no channel to choose between, so the tab switcher is
+  // hidden and the phone form renders in its primary-colour form.
+  const [loginTab, setLoginTab] = useState<LoginTab>(USE_OTP ? "whatsapp" : "sms")
 
   // Phone screen
   const [phone, setPhone] = useState("")
@@ -39,12 +47,20 @@ export default function LoginPage() {
   const [sentMsg, setSentMsg] = useState(false)
   const [phoneError, setPhoneError] = useState("")
 
-  // OTP screen
+  // OTP screen (Phase 2)
   const [otp, setOtp] = useState(["", "", "", "", "", ""])
   const [verifying, setVerifying] = useState(false)
   const [otpError, setOtpError] = useState("")
   const [resendTimer, setResendTimer] = useState(30)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  // Password screen (Phase 1)
+  const [password, setPassword] = useState("")
+  const [passwordError, setPasswordError] = useState("")
+
+  // Blocks the login form until the silent session check has finished, so a
+  // returning driver never sees the form flash before being sent onward.
+  const [checkingSession, setCheckingSession] = useState(true)
 
   // Profile screen
   const [name, setName] = useState("")
@@ -56,28 +72,43 @@ export default function LoginPage() {
   const [nameError, setNameError] = useState("")
   const qrInputRef = useRef<HTMLInputElement>(null)
 
-  // 古いCookieとlocalStorageを全てクリア
+  // Clear identifiers this app used to keep in local storage. The phone number
+  // and name were personal data sitting in a store any script could read; both
+  // now come from the token and the API instead.
   useEffect(() => {
-    localStorage.removeItem('loggedIn')
-    document.cookie = 'rakashi-auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
+    localStorage.removeItem("loggedIn")
+    localStorage.removeItem("rakashi_phone")
+    localStorage.removeItem("driverName")
+    document.cookie = "rakashi-auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
   }, [])
 
-  // Auto-login: if already have phone+profile, skip to dashboard
+  // Silent sign-in: the HttpOnly refresh cookie is exchanged for a token, and a
+  // driver who already has a profile goes straight to the dashboard. This is the
+  // whole of the "second visit needs nothing" behaviour.
   useEffect(() => {
-    const savedPhone = localStorage.getItem("rakashi_phone")
-    if (!savedPhone) return
-    supabase
-      .from("driver_profiles")
-      .select("id, name")
-      .eq("phone_number", savedPhone)
-      .single()
-      .then(({ data }) => {
-        if (data?.name) {
-          document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
-          router.push("/dashboard")
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (!(await hasSession())) return
+        const profile = await loadProfileOrNull()
+        if (cancelled) return
+        if (profile?.name) {
+          localStorage.setItem("driverId", profile.id)
+          router.replace("/dashboard")
+          return
         }
-      })
-  }, [])
+        // Authenticated but no profile yet - resume where registration stopped.
+        setScreen("profile")
+      } catch {
+        // No usable session; fall through to the login form.
+      } finally {
+        if (!cancelled) setCheckingSession(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
   // Resend timer
   useEffect(() => {
@@ -86,19 +117,23 @@ export default function LoginPage() {
     return () => clearInterval(t)
   }, [screen, resendTimer])
 
-  // --- Screen 1: Send OTP ---
+  // --- Screen 1: Continue with phone number ---
   const handleSendOTP = async () => {
     if (phone.length < 10) {
       setPhoneError(lang === "en" ? "Please enter a valid 10-digit number" : "कृपया 10 अंकों का नंबर दर्ज करें")
       return
     }
-    setSending(true)
     setPhoneError("")
-    if (loginTab === "whatsapp") {
-      await sendWhatsAppOTP(`+91${phone}`)
-    } else {
-      await sendSmsOTP(`+91${phone}`)
+
+    if (!USE_OTP) {
+      setPassword("")
+      setPasswordError("")
+      setScreen("password")
+      return
     }
+
+    // Phase 2: request an SMS code, then show the OTP screen.
+    setSending(true)
     setSending(false)
     setSentMsg(true)
     setTimeout(() => {
@@ -107,6 +142,78 @@ export default function LoginPage() {
       setResendTimer(30)
       setTimeout(() => otpRefs.current[0]?.focus(), 100)
     }, 1200)
+  }
+
+  /**
+   * Sign in, or create the account when the number is new.
+   *
+   * The pool reports nothing about whether a number exists (deliberately - it
+   * would otherwise be a way to test which drivers are registered), so the flow
+   * tries to sign in first and only falls back to registration. A "this number
+   * already exists" answer to that fallback means the password was simply wrong.
+   */
+  const handleAuthenticate = async () => {
+    if (password.length < 8) {
+      setPasswordError(
+        lang === "en" ? "Password must be at least 8 characters" : "पासवर्ड कम से कम 8 अक्षर का होना चाहिए"
+      )
+      return
+    }
+    setVerifying(true)
+    setPasswordError("")
+
+    try {
+      let isNewAccount = false
+      try {
+        await login(phone, password)
+      } catch {
+        try {
+          await register(phone, password)
+          isNewAccount = true
+        } catch (registerError) {
+          const message = (registerError as Error).message
+          setPasswordError(
+            message.includes("already registered")
+              ? lang === "en"
+                ? "Incorrect password"
+                : "गलत पासवर्ड"
+              : message
+          )
+          return
+        }
+      }
+
+      if (isNewAccount) {
+        setScreen("profile")
+        return
+      }
+
+      // Existing account: the profile row is already there unless registration
+      // was abandoned before the profile step, in which case resume it.
+      let profile: DriverProfileSummary | null
+      try {
+        profile = await loadProfileOrNull()
+      } catch {
+        // Signed in, but the profile could not be read - an expired token, a
+        // policy refusal or an API fault. None of those mean "not registered",
+        // so the driver stays on this screen with something to act on.
+        setPasswordError(
+          lang === "en"
+            ? "Signed in, but your profile could not be loaded. Please try again."
+            : "साइन-इन हो गया, लेकिन प्रोफ़ाइल लोड नहीं हो सकी। कृपया फिर से प्रयास करें।"
+        )
+        return
+      }
+
+      if (profile?.name) {
+        localStorage.setItem("driverId", profile.id)
+        router.push("/dashboard")
+      } else {
+        setScreen("profile")
+      }
+    } finally {
+      setVerifying(false)
+    }
   }
 
   // --- Screen 2: Verify OTP ---
@@ -123,50 +230,18 @@ export default function LoginPage() {
     if (e.key === "Backspace" && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus()
   }
 
+  // Phase 2: exchange the SMS code for a Cognito session. The mock that accepted
+  // a hardcoded 123456 - and the demo button that skipped sign-in entirely - are
+  // gone; there is no longer any path to the dashboard that does not go through
+  // Cognito.
   const handleVerifyOTP = async () => {
     const code = otp.join("")
     if (code.length !== 6) return
-
-    setVerifying(true)
-    setOtpError("")
-
-    // モックチェックを最優先
-    if (code === "123456") {
-      console.log("[OTP] Mock OTP verified")
-
-      // phone_numberをlocalStorageに保存（dashboard等で使用）
-      localStorage.setItem("rakashi_phone", `+91${phone}`)
-      // Cookieを設定（proxy.tsの認証チェック用）
-      document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
-
-      try {
-        const { data: profile } = await supabase
-          .from("driver_profiles")
-          .select("name")
-          .eq("phone_number", `+91${phone}`)
-          .single()
-
-        if (profile?.name) {
-          // 既存ユーザー → ダッシュボードへ
-          router.push("/dashboard")
-        } else {
-          // 新規ユーザー → プロフィール登録へ
-          setVerifying(false)
-          setScreen("profile")
-        }
-      } catch {
-        // プロフィールがない場合はプロフィール登録へ
-        setVerifying(false)
-        setScreen("profile")
-      }
-      return
-    }
-
-    // 本物のOTP検証（将来用）
-    setOtpError(lang === "en" ? "Invalid OTP. Please try again." : "अमान्य OTP। पुनः प्रयास करें।")
-    setOtp(["", "", "", "", "", ""])
-    otpRefs.current[0]?.focus()
-    setVerifying(false)
+    setOtpError(
+      lang === "en"
+        ? "SMS sign-in is not enabled yet."
+        : "SMS साइन-इन अभी उपलब्ध नहीं है।"
+    )
   }
 
   const handleResendOTP = async () => {
@@ -174,11 +249,6 @@ export default function LoginPage() {
     setOtp(["", "", "", "", "", ""])
     setOtpError("")
     setResendTimer(30)
-    if (loginTab === "whatsapp") {
-      await sendWhatsAppOTP(`+91${phone}`)
-    } else {
-      await sendSmsOTP(`+91${phone}`)
-    }
     setTimeout(() => otpRefs.current[0]?.focus(), 100)
   }
 
@@ -205,25 +275,31 @@ export default function LoginPage() {
     }
     setSaving(true)
 
-    const phoneNumber = `+91${phone}`
-    const { data: upserted } = await supabase.from("driver_profiles").upsert({
-      phone_number: phoneNumber,
-      name: name.trim(),
-      vehicle_type: vehicleType,
-      experience_years: experienceYears,
-      trust_score: 10,
-      total_deliveries: 0,
-      total_earnings_inr: 0,
-    }, { onConflict: "phone_number" }).select("id").single()
+    try {
+      // Upserting on cognito_sub, and no longer sending phone_number, trust_score
+      // or earnings: the server stamps identity from the token and refuses those
+      // columns from a client. Conflicting on phone_number previously let any
+      // caller overwrite whichever profile held that number.
+      const { data: upserted } = await supabase
+        .from("driver_profiles")
+        .upsert(
+          {
+            name: name.trim(),
+            vehicle_type: vehicleType,
+            experience_years: experienceYears,
+          },
+          { onConflict: "cognito_sub" }
+        )
+        .select("id")
+        .single()
 
-    if (upserted?.id) {
-      localStorage.setItem("driverId", upserted.id)
+      if (upserted?.id) {
+        localStorage.setItem("driverId", upserted.id)
+      }
+      router.push("/dashboard")
+    } finally {
+      setSaving(false)
     }
-    localStorage.setItem("rakashi_phone", phoneNumber)
-    document.cookie = 'rakashi-auth=1; path=/; max-age=86400'
-
-    setSaving(false)
-    router.push("/dashboard")
   }
 
   const isOtpComplete = otp.every((d) => d !== "")
@@ -257,10 +333,10 @@ export default function LoginPage() {
       <div className="flex-1 flex flex-col px-6 py-4 max-w-md mx-auto w-full">
 
         {/* ── Screen 1: Phone ── */}
-        {screen === "phone" && (
+        {screen === "phone" && !checkingSession && (
           <>
-            {/* Tab switcher */}
-            <div className="flex gap-2 mb-6 mt-2">
+            {/* Tab switcher (channel choice only matters for OTP delivery) */}
+            <div className={`flex gap-2 mb-6 mt-2 ${USE_OTP ? "" : "hidden"}`}>
               <button
                 onClick={() => { setLoginTab("whatsapp"); setPhoneError(""); setSentMsg(false) }}
                 className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
@@ -364,7 +440,9 @@ export default function LoginPage() {
                     {lang === "en" ? "Login with Phone" : "फोन से लॉगिन करें"}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {lang === "en" ? "We'll send a verification code via SMS" : "हम SMS के माध्यम से सत्यापन कोड भेजेंगे"}
+                    {USE_OTP
+                      ? (lang === "en" ? "We'll send a verification code via SMS" : "हम SMS के माध्यम से सत्यापन कोड भेजेंगे")
+                      : (lang === "en" ? "Enter your mobile number to continue" : "जारी रखने के लिए अपना मोबाइल नंबर दर्ज करें")}
                   </p>
                 </div>
 
@@ -407,22 +485,93 @@ export default function LoginPage() {
                   ) : (
                     <>
                       <Phone className="w-5 h-5 mr-2" />
-                      {lang === "en" ? "Send OTP via SMS" : "SMS पर OTP भेजें"}
+                      {USE_OTP
+                        ? (lang === "en" ? "Send OTP via SMS" : "SMS पर OTP भेजें")
+                        : (lang === "en" ? "Continue" : "जारी रखें")}
                     </>
                   )}
                 </Button>
 
                 <p className="text-xs text-muted-foreground text-center mt-4">
-                  {lang === "en"
-                    ? "We'll send a one-time code via SMS"
-                    : "हम SMS के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे"}
+                  {USE_OTP
+                    ? (lang === "en"
+                        ? "We'll send a one-time code via SMS"
+                        : "हम SMS के माध्यम से एक बार उपयोग होने वाला कोड भेजेंगे")
+                    : (lang === "en"
+                        ? "New here? Your account is created on the next step"
+                        : "नए हैं? अगले चरण में आपका खाता बन जाएगा")}
                 </p>
               </>
             )}
           </>
         )}
 
-        {/* ── Screen 2: OTP ── */}
+        {/* ── Screen 2a: Password (Phase 1) ── */}
+        {screen === "password" && (
+          <>
+            <div className="text-center mb-6 mt-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-3 bg-primary">
+                <Lock className="w-8 h-8 text-white" />
+              </div>
+              <h1 className="text-xl font-bold text-foreground mb-1">
+                {lang === "en" ? "Enter your password" : "अपना पासवर्ड दर्ज करें"}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {lang === "en" ? `+91 ${phone}` : `+91 ${phone}`}
+              </p>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <Input
+                type="password"
+                autoComplete="current-password"
+                placeholder={lang === "en" ? "At least 8 characters" : "कम से कम 8 अक्षर"}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  setPasswordError("")
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && password.length >= 8 && !verifying) handleAuthenticate()
+                }}
+                className="w-full h-14 bg-input border-border text-foreground placeholder:text-muted-foreground text-base rounded-xl"
+              />
+              {passwordError && <p className="text-destructive text-sm">{passwordError}</p>}
+            </div>
+
+            <Button
+              onClick={handleAuthenticate}
+              disabled={verifying || password.length < 8}
+              className="w-full h-14 text-base font-bold rounded-xl bg-primary hover:bg-primary/90 text-white mb-4"
+            >
+              {verifying ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  {lang === "en" ? "Signing in..." : "साइन इन हो रहा है..."}
+                </div>
+              ) : (
+                lang === "en" ? "Continue" : "जारी रखें"
+              )}
+            </Button>
+
+            <div className="flex items-center justify-center text-sm">
+              <button
+                onClick={() => { setScreen("phone"); setPassword(""); setPasswordError("") }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {lang === "en" ? "Change number" : "नंबर बदलें"}
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground text-center mt-4">
+              {lang === "en"
+                ? "Signing in keeps you logged in on this device"
+                : "साइन इन करने पर आप इस डिवाइस पर लॉग इन रहेंगे"}
+            </p>
+          </>
+        )}
+
+        {/* ── Screen 2b: OTP (Phase 2 - enabled by AUTH_MODE) ── */}
         {screen === "otp" && (
           <>
             <div className="text-center mb-6 mt-4">
@@ -635,18 +784,8 @@ export default function LoginPage() {
           </>
         )}
 
-        {/* Demo shortcut */}
-        {screen === "phone" && (
-          <button
-            onClick={() => {
-              document.cookie = "rakashi-auth=1; path=/; max-age=86400"
-              router.push("/dashboard")
-            }}
-            className="mt-6 w-full py-3 text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
-          >
-            {lang === "en" ? "Demo login (skip OTP)" : "डेमो लॉगिन (OTP छोड़ें)"}
-          </button>
-        )}
+        {/* The demo shortcut that set the auth cookie and jumped to the dashboard
+            has been removed: it bypassed sign-in entirely. */}
       </div>
     </div>
   )

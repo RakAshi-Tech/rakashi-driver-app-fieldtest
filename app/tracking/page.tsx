@@ -238,21 +238,20 @@ export default function TrackingPage() {
   // ── Supabase: Start shift ──────────────────────────────────────────────────
   const dbStartShift = async () => {
     try {
-      const driverId = localStorage.getItem('driverId') || 'demo'
       const today = new Date().toISOString().split('T')[0]
 
+      // Scoped to the caller server-side, so only the date needs filtering here.
       const { data: existingShift } = await supabase
         .from('driver_shifts')
         .select('id')
-        .eq('driver_id', driverId)
         .eq('shift_date', today)
         .single()
 
       if (!existingShift) {
+        // driver_id omitted: the API stamps it from the caller's token.
         await supabase
           .from('driver_shifts')
           .insert({
-            driver_id: driverId,
             shift_date: today,
             start_time: new Date().toISOString(),
             total_deliveries: 0,
@@ -278,7 +277,6 @@ export default function TrackingPage() {
       const { data, error } = await supabase
         .from('gps_delivery_summary')
         .insert({
-          driver_id: localStorage.getItem('driverId') || 'demo',
           job_id: localStorage.getItem('jobId') || 'mock-123',
           started_at: new Date().toISOString(),
           start_lat: destLat,
